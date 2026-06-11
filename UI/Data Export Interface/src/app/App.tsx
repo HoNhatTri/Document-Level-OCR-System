@@ -89,7 +89,14 @@ export default function App() {
       });
 
       if (!response.ok) {
-        throw new Error("Lỗi khi xử lý tài liệu từ Backend");
+        let message = "Loi khi xu ly tai lieu tu Backend";
+        try {
+          const errorBody = await response.json();
+          message = errorBody.detail || message;
+        } catch {
+          message = await response.text() || message;
+        }
+        throw new Error(message);
       }
 
       const result = await response.json();
@@ -100,7 +107,11 @@ export default function App() {
         [fileId]: {
           text: result.extracted_text || "Không có nội dung text",
           tables: result.tables || [],
-          json: result.json_data || {}
+          json: result.json_data || {},
+          bounding_boxes: result.bounding_boxes || [],
+          ai: result.ai_analysis
+            ? { ...result.ai_analysis, layout_regions: result.layout_regions || result.ai_analysis.layout_regions || [] }
+            : null
         }
       }));
 
@@ -114,7 +125,8 @@ export default function App() {
       toast.success("Xử lý tài liệu thành công!");
       
     } catch (error) {
-      toast.error("Có lỗi xảy ra khi gọi Model OCR!");
+      const message = error instanceof Error ? error.message : "Co loi xay ra khi goi Model OCR!";
+      toast.error(message);
       setFiles((prev) => prev.map(f => f.id === fileId ? { ...f, status: "error" } : f));
       console.error(error);
     }
