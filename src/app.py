@@ -7,7 +7,11 @@ import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
-from src.agent import DocumentAgent
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path="api_key.env")
+
+from src.agent import DocumentExtractionAgent
 from src.layout_analyzer import LayoutAnalyzer
 from src.ocr_engine import OCREngine
 from src.table_extractor import TableExtractor
@@ -17,6 +21,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from docx import Document
 from docx.shared import Inches, Pt
+
 
 app = FastAPI()
 
@@ -48,7 +53,7 @@ app.add_middleware(
 )
 
 engine = OCREngine(config_path="configs/model_config.yaml")
-agent = DocumentAgent()
+agent = DocumentExtractionAgent()
 layout_analyzer = LayoutAnalyzer()
 table_extractor = TableExtractor()
 

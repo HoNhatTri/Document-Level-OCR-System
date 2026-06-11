@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { ZoomIn, ZoomOut, RotateCw, Copy } from "lucide-react";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -24,13 +24,11 @@ interface DocumentViewerProps {
 export function DocumentViewer({ imageUrl, boundingBoxes, onBoxClick }: DocumentViewerProps) {
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
 
-  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.25, 3));
+  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.5, 3));
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.25, 0.5));
   const handleRotate = () => setRotation((prev) => (prev + 90) % 360);
 
-  // Hàm xử lý copy text
   const handleCopy = (text: string, box: BoundingBox) => {
     if (!text) return;
     navigator.clipboard.writeText(text);
@@ -40,6 +38,7 @@ export function DocumentViewer({ imageUrl, boundingBoxes, onBoxClick }: Document
 
   return (
     <div className="flex flex-col h-full bg-gray-100">
+      {/* THANH CÔNG CỤ (Giữ nguyên) */}
       <div className="flex items-center gap-2 p-3 bg-white border-b shrink-0 z-10">
         <Button variant="outline" size="sm" onClick={handleZoomOut}>
           <ZoomOut className="size-4" />
@@ -56,31 +55,36 @@ export function DocumentViewer({ imageUrl, boundingBoxes, onBoxClick }: Document
         </Button>
       </div>
 
-      <div 
-        ref={containerRef}
-        className="flex-1 overflow-auto p-4 flex items-center justify-center relative"
-      >
+      {/* KHU VỰC VIEW ẢNH: Đã gỡ Flexbox, dùng căn giữa truyền thống */}
+      <div className="flex-1 overflow-auto bg-gray-100 text-center whitespace-nowrap">
+        
+        {/* Thẻ ẩn này giúp ép nội dung luôn nằm giữa theo chiều dọc một cách an toàn */}
+        <span className="inline-block h-full align-middle"></span>
+
+        {/* KHUNG CHỨA ẢNH & BOUNDING BOX */}
         <div 
-          className="relative inline-block"
+          className="relative inline-block align-middle text-left whitespace-normal m-4 transition-transform duration-200"
           style={{
-            transform: `scale(${zoom}) rotate(${rotation}deg)`,
-            transformOrigin: "center center",
-            transition: "transform 0.2s ease"
+            zoom: zoom,
+            transform: `rotate(${rotation}deg)`,
+            transformOrigin: "center center"
           }}
         >
           <img 
             src={imageUrl} 
             alt="Document" 
-            className="max-w-full h-auto shadow-sm"
+            className="shadow-lg block"
+            style={{
+              maxWidth: "100%",
+              maxHeight: "85vh" // Giới hạn chiều cao để ban đầu ảnh luôn lọt thỏm trong màn hình
+            }}
           />
           
-          {/* LỚP PHỦ BOUNDING BOXES TƯƠNG TÁC ĐƯỢC */}
+          {/* LỚP PHỦ BOUNDING BOXES */}
           <div className="absolute inset-0 w-full h-full pointer-events-none">
             <TooltipProvider delayDuration={150}>
               {boundingBoxes.map((box, idx) => (
                 <Tooltip key={box.id || idx}>
-                  
-                  {/* Khung Bôi Đen (Trigger) */}
                   <TooltipTrigger asChild>
                     <div
                       className={cn(
@@ -99,7 +103,6 @@ export function DocumentViewer({ imageUrl, boundingBoxes, onBoxClick }: Document
                     />
                   </TooltipTrigger>
 
-                  {/* Bảng Nội Dung Nổi Lên Khi Đưa Chuột Vào (Tooltip Content) */}
                   <TooltipContent 
                     className="bg-gray-900 text-white border-gray-800 p-3 max-w-[300px] shadow-2xl z-[100]" 
                     side="bottom"
@@ -111,15 +114,13 @@ export function DocumentViewer({ imageUrl, boundingBoxes, onBoxClick }: Document
                     </p>
                     <div className="flex items-center gap-1.5 text-xs text-blue-200 bg-blue-900/50 w-fit px-2.5 py-1.5 rounded-md border border-blue-800/50">
                       <Copy className="size-3" />
-                      <span>Click để copy</span>
+                      <span>Click để Copy</span>
                     </div>
                   </TooltipContent>
-
                 </Tooltip>
               ))}
             </TooltipProvider>
           </div>
-
         </div>
       </div>
     </div>
