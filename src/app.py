@@ -1,9 +1,16 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 import shutil
 import os
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+from src.agent import DocumentAgent
+from src.layout_analyzer import LayoutAnalyzer
 from src.ocr_engine import OCREngine
+from src.table_extractor import TableExtractor
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
@@ -12,6 +19,25 @@ from docx import Document
 from docx.shared import Inches, Pt
 
 app = FastAPI()
+
+
+class AnalyzeRequest(BaseModel):
+    extracted_text: str = ""
+    json_data: dict[str, Any] = Field(default_factory=dict)
+    bounding_boxes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ChatRequest(BaseModel):
+    question: str
+    extracted_text: str = ""
+    json_data: dict[str, Any] = Field(default_factory=dict)
+    bounding_boxes: list[dict[str, Any]] = Field(default_factory=list)
+    ai_analysis: dict[str, Any] | None = None
+
+
+class LayoutRequest(BaseModel):
+    json_data: dict[str, Any] = Field(default_factory=dict)
+    tables: list[dict[str, Any]] = Field(default_factory=list)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,16 +48,41 @@ app.add_middleware(
 )
 
 engine = OCREngine(config_path="configs/model_config.yaml")
+agent = DocumentAgent()
+layout_analyzer = LayoutAnalyzer()
+table_extractor = TableExtractor()
 
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
-    temp_file_path = f"data/sample_images/temp_{file.filename}"
-    with open(temp_file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    raw_result = engine.process_image(temp_file_path)
+    original_filename = file.filename or "upload"
+    extension = Path(original_filename).suffix.lower()
+    allowed_extensions = {".jpg", ".jpeg", ".png", ".pdf"}
+    if extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail="Chi ho tro file PDF, PNG, JPG, JPEG.",
+        )
+
+    upload_dir = Path("data/sample_images")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    temp_file_path = upload_dir / f"temp_{uuid4().hex}{extension}"
+
+    try:
+        with temp_file_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        raw_result = engine.process_document(str(temp_file_path))
+    except Exception as exc:
+        if temp_file_path.exists():
+            temp_file_path.unlink()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Khong the xu ly OCR: {exc}",
+        ) from exc
     extracted_text = engine.get_raw_text(raw_result)
     structured_data = engine.get_structured_data(raw_result)
+    tables = table_extractor.extract_tables(structured_data)
+    layout_regions = layout_analyzer.analyze(structured_data, tables=tables)
     
     # --- ĐOẠN CODE MỚI THÊM: Tính toán tọa độ Bounding Box ---
     bounding_boxes = []
@@ -63,6 +114,13 @@ async def upload_document(file: UploadFile = File(...)):
                 })
                 box_id += 1
                 
+    ai_analysis = agent.analyze(
+        extracted_text=extracted_text,
+        structured_data=structured_data,
+        bounding_boxes=bounding_boxes,
+    )
+    ai_analysis["layout_regions"] = layout_regions
+
     if os.path.exists(temp_file_path):
         os.remove(temp_file_path)
         
@@ -71,7 +129,39 @@ async def upload_document(file: UploadFile = File(...)):
         "filename": file.filename,
         "extracted_text": extracted_text,
         "json_data": structured_data,
+        "tables": tables,
+        "layout_regions": layout_regions,
+        "ai_analysis": ai_analysis,
         "bounding_boxes": bounding_boxes # <--- Truyền mảng tọa độ này lên Web
+    }
+
+@app.post("/api/analyze")
+async def analyze_document(payload: AnalyzeRequest):
+    analysis = agent.analyze(
+        extracted_text=payload.extracted_text,
+        structured_data=payload.json_data,
+        bounding_boxes=payload.bounding_boxes,
+    )
+    analysis["layout_regions"] = layout_analyzer.analyze(payload.json_data)
+    return analysis
+
+@app.post("/api/chat")
+async def chat_document(payload: ChatRequest):
+    return agent.answer_question(
+        question=payload.question,
+        extracted_text=payload.extracted_text,
+        analysis=payload.ai_analysis,
+        structured_data=payload.json_data,
+        bounding_boxes=payload.bounding_boxes,
+    )
+
+@app.post("/api/layout")
+async def layout_document(payload: LayoutRequest):
+    return {
+        "layout_regions": layout_analyzer.analyze(
+            payload.json_data,
+            tables=payload.tables,
+        )
     }
 
 @app.post("/api/export-pdf")

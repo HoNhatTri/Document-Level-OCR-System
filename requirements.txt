@@ -4,3 +4,5 @@ opencv-python>=4.8.0
 fastapi
 uvicorn[standard]
 python-multipart
+reportlab
+python-docx

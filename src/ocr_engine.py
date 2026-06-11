@@ -22,15 +22,25 @@ class OCREngine:
         )
         print("[+] Khởi tạo mô hình thành công!\n")
 
-    def process_image(self, image_path):
-        """Đọc ảnh từ đường dẫn và thực hiện nhận diện."""
-        if not os.path.exists(image_path):
-            raise FileNotFoundError(f"Không tìm thấy file ảnh: {image_path}")
+    def process_document(self, file_path):
+        """Read an image/PDF file and run OCR."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Khong tim thay file: {file_path}")
 
-        # Chuẩn bị dữ liệu và chạy suy luận
-        doc = DocumentFile.from_images(image_path)
+        extension = os.path.splitext(file_path)[1].lower()
+        if extension == ".pdf":
+            doc = DocumentFile.from_pdf(file_path)
+        elif extension in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
+            doc = DocumentFile.from_images(file_path)
+        else:
+            raise ValueError(f"Dinh dang file khong duoc ho tro: {extension}")
+
         result = self.model(doc)
         return result
+
+    def process_image(self, image_path):
+        """Đọc ảnh từ đường dẫn và thực hiện nhận diện."""
+        return self.process_document(image_path)
 
     def get_raw_text(self, result):
         """Trích xuất văn bản thuần túy từ kết quả nhận diện (dùng cho LLM/Agent)."""
