@@ -20,7 +20,7 @@ def main():
         print("[-] CẢNH BÁO: API Key chưa đúng định dạng.")
         return
 
-    image_path = os.path.join(project_root, "data", "sample_images", "test_2.jpg")
+    image_path = os.path.join(project_root, "data", "sample_images", "test_4.jpg")
     config_path = os.path.join(project_root, "configs", "model_config.yaml")
     
     if not os.path.exists(image_path):
@@ -35,11 +35,11 @@ def main():
     extracted_text = ocr.get_raw_text(result)
     
     print("="*60)
-    print(" 📄 VĂN BẢN OCR THÔ (BỊ NHIỄU, ĐỨT GÃY TỪ ẢNH GỐC):")
+    print(" VĂN BẢN OCR THÔ:")
     print("="*60)
     print(extracted_text[:1000] + "\n...\n") 
 
-    print("[3] Kích hoạt Agentic AI (Groq - LLaMA 3.3) để phân tích và tự sửa lỗi...\n")
+    print("[3] Kích hoạt Agentic AI để phân tích và tự sửa lỗi...\n")
     agent = DocumentExtractionAgent()
     analysis_result = agent.analyze(extracted_text)
 
@@ -47,19 +47,19 @@ def main():
     # IN PHẦN MỚI DÀNH RIÊNG CHO WEB DEMO CỦA BẠN
     # ---------------------------------------------------------
     print("="*60)
-    print(" ✨ VĂN BẢN ĐÃ ĐƯỢC LLM SỬA LỖI:")
+    print(" VĂN BẢN ĐÃ ĐƯỢC LLM SỬA LỖI:")
     print("="*60)
     print(analysis_result.get("full_corrected_text", "Không có văn bản nào được trả về."))
     print("\n")
 
     print("="*60)
-    print(" 📊 DỮ LIỆU JSON ĐÃ ĐƯỢC BÓC TÁCH (DYNAMIC FIELDS):")
+    print(" DỮ LIỆU JSON ĐÃ ĐƯỢC BÓC TÁCH:")
     print("="*60)
     print(json.dumps(analysis_result.get("fields", {}), indent=2, ensure_ascii=False))
     print("\n")
 
     print("="*60)
-    print(" 🤖 AGENT TRACE (NHẬT KÝ KIỂM TRA LỖI):")
+    print(" NHẬT KÝ KIỂM TRA LỖI:")
     print("="*60)
     for step in analysis_result.get("agent_trace", []):
         print(f"  • {step}")

@@ -13,7 +13,7 @@ class DocumentExtractionAgent:
     def __init__(self):
         api_key = os.environ.get("GROQ_API_KEY")
         if not api_key:
-            print("⚠️ CẢNH BÁO: Chưa có GROQ_API_KEY trong môi trường.")
+            print("⚠️ CẢNH BÁO: Chưa có API_KEY trong môi trường.")
             
         self.client = Groq(api_key=api_key)
         self.model_name = "llama-3.3-70b-versatile"
@@ -55,8 +55,7 @@ class DocumentExtractionAgent:
 
     def tool_semantic_syntax_checker(self, text_field: str) -> dict:
         """
-        Đã tắt phần bắt lỗi đứt gãy câu (hanging words) để giữ nguyên cấu trúc cột.
-        Chỉ giữ lại kiểm tra các ký tự rác hoặc nhiễu OCR quá nặng.
+        Kiểm tra các ký tự rác hoặc nhiễu.
         """
         if not text_field: return {"is_valid": True, "error": None}
         text = str(text_field).strip()
@@ -90,10 +89,10 @@ class DocumentExtractionAgent:
         
         try:
             draft_fields = json.loads(draft_response)
-            trace_logs.append(f"Step 1: Layout-Preserving Draft extraction completed using {self.model_name}.")
+            trace_logs.append(f"Layout-Preserving Draft extraction completed using {self.model_name}.")
         except Exception as e:
             draft_fields = {}
-            trace_logs.append(f"Step 1: Failed to parse initial LLM JSON. Error: {str(e)}")
+            trace_logs.append(f"Failed to parse initial LLM JSON. Error: {str(e)}")
 
         # BƯỚC 2: QUÉT LỖI ĐỆ QUY
         errors_found = []
@@ -107,18 +106,18 @@ class DocumentExtractionAgent:
                     num_check = self.tool_number_format_validator(data)
                     if not num_check["is_valid"]:
                         errors_found.append(f"Location [{path}]: {num_check['error']}")
-                        trace_logs.append(f"Step 2: Number Tool flagged issue at {path}.")
+                        trace_logs.append(f"Number Tool flagged issue at {path}.")
                 sem_check = self.tool_semantic_syntax_checker(data)
                 if not sem_check["is_valid"]:
                     errors_found.append(f"Location [{path}]: {sem_check['error']}")
-                    trace_logs.append(f"Step 2: Noise Tool flagged issue at {path}.")
+                    trace_logs.append(f"Noise Tool flagged issue at {path}.")
 
         scan_errors(draft_fields)
         final_fields = draft_fields.copy()
 
         # BƯỚC 3: TỰ SỬA LỖI NẾU CẦN
         if errors_found:
-            trace_logs.append(f"Step 3: Decision -> Found {len(errors_found)} OCR errors. Triggering Self-Correction Node.")
+            trace_logs.append(f"Decision -> Found {len(errors_found)} OCR errors. Triggering Self-Correction Node.")
             error_prompt = "\n".join(errors_found)
             
             prompt_2 = f"""
@@ -134,11 +133,11 @@ class DocumentExtractionAgent:
             corrected_response = self._call_llm(prompt_2, require_json=True)
             try:
                 final_fields = json.loads(corrected_response)
-                trace_logs.append(f"Step 4: Self-Correction successful.")
+                trace_logs.append(f"Self-Correction successful.")
             except Exception as e:
-                trace_logs.append(f"Step 4: Self-Correction failed. Error: {str(e)}")
+                trace_logs.append(f"Self-Correction failed. Error: {str(e)}")
         else:
-            trace_logs.append("Step 3: Decision -> No character/noise errors detected. Proceeding with draft.")
+            trace_logs.append("Decision -> No character/noise errors detected. Proceeding with draft.")
 
         full_corrected_text = final_fields.get("full_corrected_text", "")
         if "full_corrected_text" in final_fields:

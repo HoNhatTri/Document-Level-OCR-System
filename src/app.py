@@ -89,7 +89,7 @@ async def upload_document(file: UploadFile = File(...)):
     tables = table_extractor.extract_tables(structured_data)
     layout_regions = layout_analyzer.analyze(structured_data, tables=tables)
     
-    # --- ĐOẠN CODE MỚI THÊM: Tính toán tọa độ Bounding Box ---
+    # Tính toán tọa độ Bounding Box
     bounding_boxes = []
     box_id = 1
     
@@ -137,7 +137,7 @@ async def upload_document(file: UploadFile = File(...)):
         "tables": tables,
         "layout_regions": layout_regions,
         "ai_analysis": ai_analysis,
-        "bounding_boxes": bounding_boxes # <--- Truyền mảng tọa độ này lên Web
+        "bounding_boxes": bounding_boxes
     }
 
 @app.post("/api/analyze")
@@ -251,7 +251,6 @@ async def export_docx(data: dict):
         for l in all_lines:
             p = doc.add_paragraph()
             
-            # ĐÂY LÀ CHÌA KHÓA: 
             # Chiều rộng trang DOCX thực tế (trừ margin) khoảng ~6.5 inches. 
             # Ta nhân tọa độ X (từ 0 đến 1) với 6.5 để đẩy chữ vào đúng vị trí.
             indent_inches = l['xmin'] * 6.5
