@@ -6,3 +6,8 @@ uvicorn[standard]
 python-multipart
 reportlab
 python-docx
+python-dotenv
+groq
+transformers==4.57.6
+sentencepiece
+safetensors

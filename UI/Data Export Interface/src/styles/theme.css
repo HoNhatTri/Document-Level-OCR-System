@@ -179,3 +179,41 @@
     line-height: 1.5;
   }
 }
+
+.dark .bg-white {
+  background-color: var(--card) !important;
+}
+
+.dark .bg-gray-50,
+.dark .bg-gray-50\/50,
+.dark .bg-gray-100 {
+  background-color: oklch(0.18 0 0) !important;
+}
+
+.dark .bg-gray-900 {
+  background-color: oklch(0.1 0 0) !important;
+}
+
+.dark .text-gray-900,
+.dark .text-gray-800 {
+  color: oklch(0.985 0 0) !important;
+}
+
+.dark .text-gray-700,
+.dark .text-gray-600 {
+  color: oklch(0.86 0 0) !important;
+}
+
+.dark .text-gray-500 {
+  color: oklch(0.72 0 0) !important;
+}
+
+.dark .border,
+.dark .border-b,
+.dark .border-l,
+.dark .border-r,
+.dark .border-t,
+.dark .border-gray-200,
+.dark .border-gray-300 {
+  border-color: var(--border) !important;
+}

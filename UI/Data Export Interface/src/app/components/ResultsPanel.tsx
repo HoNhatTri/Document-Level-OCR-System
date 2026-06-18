@@ -49,12 +49,33 @@ interface AIAnalysis {
   document_type_confidence?: number;
   summary?: string;
   fields?: Record<string, AIField>;
+  llm_fields?: Record<string, AIField>;
+  full_corrected_text?: string;
   warnings?: AIWarning[];
   suggested_tables?: any[];
   layout_regions?: LayoutRegion[];
   generic_kv?: {
     key_values?: GenericKVPair[];
     sections?: GenericKVPair[];
+  };
+  layoutxlm_fields?: Record<string, AIField>;
+  layoutxlm?: {
+    status?: string;
+    model?: string;
+    device?: string;
+    message?: string;
+    fields?: Record<string, AIField>;
+    agent_trace?: string[];
+  };
+  llm?: {
+    status?: string;
+    provider?: string;
+    model?: string;
+    message?: string;
+    summary?: string;
+    full_corrected_text?: string;
+    fields?: Record<string, AIField>;
+    agent_trace?: string[];
   };
 }
 
@@ -161,6 +182,7 @@ const warningTypeLabels: Record<string, string> = {
   low_confidence_word: "Từ có độ tin cậy thấp",
   missing_total_amount: "Thiếu tổng tiền",
   missing_tax_code: "Thiếu mã số thuế",
+  missing_invoice_number: "Thiếu số hóa đơn",
 };
 
 const quickQuestions = [
@@ -174,6 +196,19 @@ const quickQuestions = [
 
 export function ResultsPanel({ data }: ResultsPanelProps) {
   const aiFields = data.ai?.fields ? Object.entries(data.ai.fields) : [];
+  const layoutxlm = data.ai?.layoutxlm;
+  const layoutxlmFields = layoutxlm?.fields
+    ? Object.entries(layoutxlm.fields)
+    : data.ai?.layoutxlm_fields
+      ? Object.entries(data.ai.layoutxlm_fields)
+      : [];
+  const llm = data.ai?.llm;
+  const llmFields = llm?.fields
+    ? Object.entries(llm.fields)
+    : data.ai?.llm_fields
+      ? Object.entries(data.ai.llm_fields)
+      : [];
+  const correctedText = llm?.full_corrected_text || data.ai?.full_corrected_text || "";
   const layoutRegions = data.ai?.layout_regions || [];
   const genericKeyValues = data.ai?.generic_kv?.key_values || [];
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -339,6 +374,84 @@ export function ResultsPanel({ data }: ResultsPanelProps) {
                   )}
                 </Card>
 
+                <Card className="p-4 bg-white shadow-sm border-gray-200 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-sm">LayoutXLM bổ trợ</div>
+                      <div className="text-xs text-gray-500 mt-1 break-all">
+                        {layoutxlm?.model || "model/layoutxlm-sroie-mcocr"}
+                        {layoutxlm?.device ? ` / ${layoutxlm.device}` : ""}
+                      </div>
+                    </div>
+                    <div className={`text-xs rounded-md px-2 py-1 border ${
+                      layoutxlm?.status === "ok" || layoutxlm?.status === "ready"
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : layoutxlm?.status === "error" || layoutxlm?.status === "unavailable"
+                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                          : "bg-gray-50 text-gray-600 border-gray-200"
+                    }`}>
+                      {layoutxlm?.status || "skipped"}
+                    </div>
+                  </div>
+
+                  {layoutxlm?.message && (
+                    <div className="text-sm text-gray-600">{layoutxlm.message}</div>
+                  )}
+                </Card>
+
+                <Card className="p-4 bg-white shadow-sm border-gray-200 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-sm">LLM bổ trợ</div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {llm?.provider || "none"}{llm?.model ? ` / ${llm.model}` : ""}
+                      </div>
+                    </div>
+                    <div className={`text-xs rounded-md px-2 py-1 border ${
+                      llm?.status === "ok" || llm?.status === "enabled"
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : llm?.status === "error" || llm?.status === "unavailable"
+                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                          : "bg-gray-50 text-gray-600 border-gray-200"
+                    }`}>
+                      {llm?.status || "disabled"}
+                    </div>
+                  </div>
+
+                  {llm?.message && (
+                    <div className="text-sm text-gray-600">{llm.message}</div>
+                  )}
+
+                  {llm?.summary && (
+                    <div>
+                      <div className="text-xs uppercase tracking-wide text-gray-500">Tóm tắt LLM</div>
+                      <p className="text-sm text-gray-800 leading-relaxed">{llm.summary}</p>
+                    </div>
+                  )}
+
+                  {correctedText && (
+                    <div>
+                      <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Text đã sửa bởi LLM</div>
+                      <pre className="max-h-56 overflow-auto rounded-md border border-gray-200 bg-gray-50 p-3 text-xs font-mono whitespace-pre-wrap text-gray-800">
+                        {correctedText}
+                      </pre>
+                    </div>
+                  )}
+
+                  {llm?.agent_trace && llm.agent_trace.length > 0 && (
+                    <div>
+                      <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Trace</div>
+                      <div className="space-y-1">
+                        {llm.agent_trace.map((step, index) => (
+                          <div key={`${step}-${index}`} className="text-xs text-gray-600">
+                            {index + 1}. {step}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </Card>
+
                 <Card className="p-4 bg-white shadow-sm border-gray-200">
                   <div className="font-semibold text-sm mb-3">Hỏi đáp trên tài liệu</div>
 
@@ -440,6 +553,64 @@ export function ResultsPanel({ data }: ResultsPanelProps) {
 
                 <Card className="p-4 bg-white shadow-sm border-gray-200">
                   <div className="font-semibold text-sm mb-3">Nhãn - giá trị tự phát hiện</div>
+                  {layoutxlmFields.length > 0 && (
+                    <div className="mb-4 rounded-md border border-emerald-100 bg-emerald-50 p-3">
+                      <div className="font-semibold text-sm mb-2 text-emerald-950">
+                        Trường do LayoutXLM bổ sung
+                      </div>
+                      <div className="space-y-2">
+                        {layoutxlmFields.map(([name, field]) => (
+                          <div key={name} className="border-b border-emerald-100 last:border-b-0 pb-2 last:pb-0">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-xs font-medium text-emerald-700 break-all">
+                                {fieldNameLabels[name] || name}
+                              </div>
+                              {field.confidence !== undefined && (
+                                <div className="text-xs text-emerald-700 shrink-0">
+                                  {formatConfidence(field.confidence)}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-sm text-emerald-950 break-words mt-1">
+                              {formatFieldValue(field)}
+                            </div>
+                            {field.source && (
+                              <div className="text-xs text-emerald-600 mt-1">{field.source}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {llmFields.length > 0 && (
+                    <div className="mb-4 rounded-md border border-blue-100 bg-blue-50 p-3">
+                      <div className="font-semibold text-sm mb-2 text-blue-950">Trường do LLM bổ sung</div>
+                      <div className="space-y-2">
+                        {llmFields.map(([name, field]) => (
+                          <div key={name} className="border-b border-blue-100 last:border-b-0 pb-2 last:pb-0">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-xs font-medium text-blue-700 break-all">
+                                {fieldNameLabels[name] || name}
+                              </div>
+                              {field.confidence !== undefined && (
+                                <div className="text-xs text-blue-700 shrink-0">
+                                  {formatConfidence(field.confidence)}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-sm text-blue-950 break-words mt-1">
+                              {formatFieldValue(field)}
+                            </div>
+                            {field.source && (
+                              <div className="text-xs text-blue-600 mt-1">{field.source}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {genericKeyValues.length > 0 ? (
                     <div className="space-y-3">
                       {genericKeyValues.slice(0, 12).map((pair, index) => (

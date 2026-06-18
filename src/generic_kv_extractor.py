@@ -63,11 +63,18 @@ class GenericKVExtractor:
         "billing to",
         "sold to",
         "invoice",
+        "invoice #",
+        "invoice number",
         "invoice#",
         "invoice no",
+        "date",
         "invoice date",
         "terms",
         "due date",
+        "payment method",
+        "reference code",
+        "prepared by",
+        "approved by",
         "item",
         "item & description",
         "description",
@@ -92,6 +99,39 @@ class GenericKVExtractor:
     }
 
     INLINE_SEPARATORS = [":", "："]
+    LABEL_HINTS = {
+        "code",
+        "number",
+        "no",
+        "date",
+        "terms",
+        "due",
+        "by",
+        "method",
+        "status",
+        "reference",
+        "prepared",
+        "approved",
+        "contact",
+        "email",
+        "phone",
+        "tax",
+        "total",
+        "balance",
+        "amount",
+        "invoice",
+        "payment",
+        "address",
+        "ma",
+        "so",
+        "ngay",
+        "mau",
+        "ky",
+        "hieu",
+        "thue",
+        "thanh",
+        "toan",
+    }
 
     def extract(
         self,
@@ -99,6 +139,8 @@ class GenericKVExtractor:
         structured_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         lines = self._lines_from_structured(structured_data or {}) or self._lines_from_text(extracted_text)
+        if any("cy" in line for line in lines):
+            lines = sorted(lines, key=lambda item: (item.get("page", 1), item.get("cy", 0), item.get("x1", 0)))
         key_values: list[dict[str, Any]] = []
 
         key_values.extend(self._extract_inline_pairs(lines))
@@ -205,37 +247,115 @@ class GenericKVExtractor:
             value_lines = ordered[1:]
             label = label_line["text"].strip()
             value = " ".join(line["text"].strip() for line in value_lines if line["text"].strip())
-            if self._looks_like_label(label) and value:
+            first_value_x = min(line.get("x1", 1.0) for line in value_lines)
+            horizontal_gap = first_value_x - label_line.get("x2", label_line.get("x1", 0.0))
+            if self._looks_like_row_label(label) and value and horizontal_gap <= 0.24:
                 pairs.append(self._pair(label, value, group, "layout:same_row", 0.68))
         return pairs
 
     def _extract_next_line_pairs(self, lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
         pairs = []
+        covered_by_section: set[str] = set()
         for index, line in enumerate(lines):
+            if line.get("id") in covered_by_section:
+                continue
+
             label = line["text"].strip(" :-")
             normalized_label = self._normalize(label)
             if not self._looks_like_standalone_label(label):
                 continue
 
-            value_lines = []
-            for next_line in lines[index + 1 : index + 6]:
-                text = next_line["text"].strip()
-                if not text:
-                    continue
-                if self._is_table_header(text):
-                    break
-                if self._is_stop_label(text) and value_lines:
-                    break
-                if self._looks_like_standalone_label(text) and value_lines:
-                    break
-                value_lines.append(next_line)
-                if len(value_lines) >= 4 or self._canonical_for_label(normalized_label) not in {"buyer", "seller", "shipping_address", "billing_address"}:
-                    break
+            if "cy" in line:
+                value_lines = self._next_value_lines_by_geometry(lines, index, line, normalized_label)
+            else:
+                value_lines = self._next_value_lines_by_order(lines, index, normalized_label)
 
             value = "\n".join(item["text"].strip() for item in value_lines if item["text"].strip()).strip()
             if value:
                 pairs.append(self._pair(label, value, [line, *value_lines], "section:next_lines", 0.66))
+                if self._canonical_for_label(normalized_label) in {
+                    "buyer",
+                    "seller",
+                    "shipping_address",
+                    "billing_address",
+                }:
+                    covered_by_section.update(item.get("id", "") for item in value_lines)
         return pairs
+
+    def _next_value_lines_by_order(
+        self,
+        lines: list[dict[str, Any]],
+        index: int,
+        normalized_label: str,
+    ) -> list[dict[str, Any]]:
+        value_lines = []
+        canonical = self._canonical_for_label(normalized_label)
+        is_block = canonical in {"buyer", "seller", "shipping_address", "billing_address"}
+        max_lines = 6 if is_block else 1
+        for next_line in lines[index + 1 : index + 6]:
+            text = next_line["text"].strip()
+            if not text:
+                continue
+            if self._is_table_header(text):
+                break
+            if self._is_stop_label(text) and (value_lines or is_block):
+                break
+            if not is_block and self._looks_like_standalone_label(text) and value_lines:
+                break
+            value_lines.append(next_line)
+            if len(value_lines) >= max_lines:
+                break
+        return value_lines
+
+    def _next_value_lines_by_geometry(
+        self,
+        lines: list[dict[str, Any]],
+        index: int,
+        label_line: dict[str, Any],
+        normalized_label: str,
+    ) -> list[dict[str, Any]]:
+        label_x1 = label_line.get("x1", 0.0)
+        label_x2 = label_line.get("x2", label_x1)
+        label_cx = label_line.get("cx", (label_x1 + label_x2) / 2)
+        label_y = label_line.get("cy", 0.0)
+        canonical = self._canonical_for_label(normalized_label)
+        is_block = canonical in {"buyer", "seller", "shipping_address", "billing_address"}
+        max_lines = 6 if is_block else 1
+
+        if label_cx < 0.5:
+            column_left = max(0.0, label_x1 - 0.08)
+            column_right = min(0.58, max(label_x2 + 0.42, label_cx + 0.18))
+        else:
+            column_left = max(0.42, label_x1 - 0.18)
+            column_right = min(1.0, label_x2 + 0.12)
+
+        value_lines = []
+        for candidate in lines[index + 1 :]:
+            if candidate.get("page", 1) != label_line.get("page", 1):
+                continue
+            if "cy" not in candidate or candidate["cy"] <= label_y:
+                continue
+            if candidate["cy"] - label_y > (0.34 if is_block else 0.12):
+                break
+
+            text = candidate["text"].strip()
+            if not text:
+                continue
+            candidate_cx = candidate.get("cx", 0.0)
+            if not (column_left <= candidate_cx <= column_right):
+                continue
+            if self._is_table_header(text):
+                break
+            if self._is_stop_label(text) and (value_lines or is_block):
+                break
+            if not is_block and self._looks_like_standalone_label(text) and value_lines:
+                break
+
+            value_lines.append(candidate)
+            if len(value_lines) >= max_lines:
+                break
+
+        return value_lines
 
     def _pair(
         self,
@@ -279,14 +399,23 @@ class GenericKVExtractor:
         normalized = self._normalize(cleaned)
         if not cleaned or len(cleaned) > 45:
             return False
-        if any(alias in normalized for aliases in self.SECTION_ALIASES.values() for alias in aliases):
+        if self._is_section_alias(normalized):
             return True
-        if normalized in self.STOP_LABELS:
+        if self._is_known_label(normalized):
             return True
         words = cleaned.split()
-        if len(words) <= 5 and not self._mostly_numeric(cleaned):
+        if len(words) <= 5 and not self._mostly_numeric(cleaned) and self._has_label_hint(normalized):
             return True
         return False
+
+    def _looks_like_row_label(self, text: str) -> bool:
+        cleaned = text.strip(" :-#")
+        normalized = self._normalize(cleaned)
+        if not cleaned or len(cleaned) > 45 or self._mostly_numeric(cleaned):
+            return False
+        if self._is_section_alias(normalized) or self._is_known_label(normalized):
+            return True
+        return self._has_label_hint(normalized)
 
     def _looks_like_standalone_label(self, text: str) -> bool:
         cleaned = text.strip(" :-")
@@ -295,17 +424,31 @@ class GenericKVExtractor:
             return False
         if self._split_inline_pair(text):
             return False
-        if any(alias == normalized for aliases in self.SECTION_ALIASES.values() for alias in aliases):
+        if self._is_section_alias(normalized, exact=True):
             return True
-        if normalized in self.STOP_LABELS:
+        if self._is_known_label(normalized):
             return True
-        return len(cleaned.split()) <= 4 and not any(char.isdigit() for char in cleaned)
+        return len(cleaned.split()) <= 4 and not any(char.isdigit() for char in cleaned) and self._has_label_hint(normalized)
 
     def _is_stop_label(self, text: str) -> bool:
         normalized = self._normalize(text.strip(" :-"))
-        return normalized in self.STOP_LABELS or any(
-            alias == normalized for aliases in self.SECTION_ALIASES.values() for alias in aliases
-        )
+        return self._is_known_label(normalized) or self._is_section_alias(normalized, exact=True)
+
+    def _is_known_label(self, normalized: str) -> bool:
+        return normalized in self.STOP_LABELS or any(label in normalized for label in self.STOP_LABELS if len(label) >= 4)
+
+    def _is_section_alias(self, normalized: str, exact: bool = False) -> bool:
+        for aliases in self.SECTION_ALIASES.values():
+            for alias in aliases:
+                if exact and alias == normalized:
+                    return True
+                if not exact and (alias == normalized or alias in normalized):
+                    return True
+        return False
+
+    def _has_label_hint(self, normalized: str) -> bool:
+        tokens = self._tokens(normalized)
+        return bool(tokens & self.LABEL_HINTS)
 
     def _is_table_header(self, text: str) -> bool:
         normalized = self._normalize(text)
@@ -318,7 +461,7 @@ class GenericKVExtractor:
                 return canonical
 
         field_aliases = {
-            "invoice_number": ["invoice#", "invoice no", "invoice number", "so hoa don", "hoa don so", "so hd"],
+            "invoice_number": ["invoice#", "invoice #", "invoice no", "invoice number", "so hoa don", "hoa don so", "so hd"],
             "invoice_form": ["mau so", "form"],
             "invoice_symbol": ["ky hieu", "serial"],
             "payment_method": ["payment method", "hinh thuc thanh toan", "phuong thuc thanh toan"],

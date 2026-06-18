@@ -5,6 +5,8 @@ import unicodedata
 from typing import Any
 
 from src.generic_kv_extractor import GenericKVExtractor
+from src.layoutxlm_extractor import OptionalLayoutXLMExtractor
+from src.llm_agent import OptionalLLMAgent
 
 
 class DocumentAgent:
@@ -89,14 +91,25 @@ class DocumentAgent:
         "total",
     ]
 
-    def __init__(self):
+    def __init__(
+        self,
+        llm_agent: OptionalLLMAgent | None = None,
+        layoutxlm_extractor: OptionalLayoutXLMExtractor | None = None,
+    ):
         self.kv_extractor = GenericKVExtractor()
+        self.llm_agent = llm_agent if llm_agent is not None else OptionalLLMAgent()
+        self.layoutxlm_extractor = (
+            layoutxlm_extractor
+            if layoutxlm_extractor is not None
+            else OptionalLayoutXLMExtractor()
+        )
 
     def analyze(
         self,
         extracted_text: str,
         structured_data: dict[str, Any] | None = None,
         bounding_boxes: list[dict[str, Any]] | None = None,
+        page_images: list[Any] | None = None,
     ) -> dict[str, Any]:
         """Return a stable AI-style analysis payload for FE and export flows."""
 
@@ -108,17 +121,58 @@ class DocumentAgent:
 
         document_type, document_type_confidence = self._classify(text)
         fields = self._extract_fields(text, lines, boxes, document_type)
-        fields.update(self._fields_from_generic_kv(generic_kv, boxes, fields))
-        warnings = self._build_warnings(structured, fields, document_type, text)
-
-        return {
+        fields.update(self._fields_from_generic_kv(generic_kv, boxes, fields, document_type))
+        layoutxlm_analysis = self.layoutxlm_extractor.extract(
+            page_images=page_images,
+            structured_data=structured,
+            document_type=document_type,
+        )
+        layoutxlm_fields = (
+            layoutxlm_analysis.get("fields", {})
+            if isinstance(layoutxlm_analysis, dict)
+            else {}
+        )
+        fields.update(
+            self._fields_from_layoutxlm(
+                layoutxlm_fields,
+                boxes,
+                fields,
+                document_type,
+            )
+        )
+        preliminary_analysis = {
             "document_type": document_type,
             "document_type_confidence": document_type_confidence,
             "summary": self._summarize(document_type, fields, text),
             "fields": fields,
+            "generic_kv": generic_kv,
+            "layoutxlm_fields": layoutxlm_fields,
+        }
+        llm_analysis = self.llm_agent.analyze(
+            extracted_text=text,
+            base_analysis=preliminary_analysis,
+            generic_kv=generic_kv,
+        )
+        llm_fields = llm_analysis.get("fields", {}) if isinstance(llm_analysis, dict) else {}
+        fields.update(self._fields_from_llm(llm_fields, boxes, fields, document_type))
+        warnings = self._build_warnings(structured, fields, document_type, text)
+        summary = self._summarize(document_type, fields, text)
+        if llm_analysis.get("status") == "ok" and llm_analysis.get("summary"):
+            summary = llm_analysis["summary"]
+
+        return {
+            "document_type": document_type,
+            "document_type_confidence": document_type_confidence,
+            "summary": summary,
+            "fields": fields,
             "warnings": warnings,
             "suggested_tables": self._suggest_tables(structured),
             "generic_kv": generic_kv,
+            "layoutxlm": layoutxlm_analysis,
+            "layoutxlm_fields": layoutxlm_fields,
+            "llm": llm_analysis,
+            "llm_fields": llm_fields,
+            "full_corrected_text": llm_analysis.get("full_corrected_text", ""),
         }
 
     def answer_question(
@@ -189,6 +243,15 @@ class DocumentAgent:
         if generic_answer:
             return generic_answer
 
+        llm_answer = self.llm_agent.answer_question(
+            question=question_text,
+            extracted_text=extracted_text,
+            analysis=current_analysis,
+            generic_kv=generic_kv,
+        )
+        if llm_answer:
+            return llm_answer
+
         matched_lines = self._find_relevant_lines(question_text, extracted_text)
         if matched_lines:
             return {
@@ -205,10 +268,16 @@ class DocumentAgent:
 
     def _classify(self, text: str) -> tuple[str, float]:
         normalized = self._normalize(text)
-        scores: dict[str, int] = {}
+        invoice_score = self._score_invoice(normalized)
+        if invoice_score >= 4:
+            confidence = min(0.94, 0.58 + invoice_score * 0.055)
+            return "invoice", round(confidence, 2)
 
+        scores: dict[str, int] = {}
         for document_type, keywords in self.DOCUMENT_KEYWORDS.items():
-            score = sum(normalized.count(keyword) for keyword in keywords)
+            if document_type == "invoice":
+                continue
+            score = sum(self._contains_phrase(normalized, keyword) for keyword in keywords)
             if score:
                 scores[document_type] = score
 
@@ -218,6 +287,64 @@ class DocumentAgent:
         best_type, best_score = max(scores.items(), key=lambda item: item[1])
         confidence = min(0.95, 0.5 + (best_score / (best_score + 6)) * 0.45)
         return best_type, round(confidence, 2)
+
+    def _score_invoice(self, normalized: str) -> int:
+        strong_patterns = [
+            r"\binvoice\s*#(?=\s|$)",
+            r"\binvoice\s*(?:no|number|date)\b",
+            r"\b(?:bill|billed|billing)\s+to\b",
+            r"\bship\s+to\b",
+            r"\bamount\s+due\b",
+            r"\bbalance\s+due\b",
+            r"\bsub\s*total\b",
+            r"\btax\s+rate\b",
+            r"\btax\s+code\b",
+            r"\bhoa don\s*(?:so)?\b",
+            r"\bso hoa don\b",
+            r"\bmau so\b",
+            r"\bky hieu\b",
+            r"\bma so thue\b",
+            r"\bmst\b",
+            r"\bdon vi ban hang\b",
+            r"\bnguoi mua hang\b",
+            r"\btong cong tien thanh toan\b",
+        ]
+        medium_patterns = [
+            r"\binvoice\b",
+            r"\bvat\b",
+            r"\bsubtotal\b",
+            r"\btotal\b",
+            r"\bamount\b",
+            r"\bpayment method\b",
+            r"\bseller\b",
+            r"\bbuyer\b",
+            r"\bnguoi ban\b",
+            r"\bnguoi mua\b",
+            r"\btong tien\b",
+            r"\bthanh tien\b",
+        ]
+        weak_reference_patterns = [
+            r"\binvoices\b",
+            r"\breceipts\b",
+            r"\bbank statements\b",
+            r"\bpassport documents\b",
+            r"\bdata records\b",
+        ]
+
+        strong_score = sum(2 for pattern in strong_patterns if re.search(pattern, normalized))
+        medium_score = sum(1 for pattern in medium_patterns if re.search(pattern, normalized))
+        weak_reference_score = sum(1 for pattern in weak_reference_patterns if re.search(pattern, normalized))
+
+        score = strong_score + medium_score
+        if strong_score == 0 and score <= 2:
+            return 0
+        if weak_reference_score >= 2 and strong_score == 0:
+            return 0
+        return score
+
+    def _contains_phrase(self, normalized: str, phrase: str) -> bool:
+        escaped = re.escape(phrase)
+        return bool(re.search(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])", normalized))
 
     def _extract_fields(
         self,
@@ -241,34 +368,37 @@ class DocumentAgent:
         if phones:
             fields["phone_numbers"] = self._field(phones, 0.75, "regex:phone", boxes, " ".join(phones))
 
-        tax_codes = self._extract_tax_codes(lines)
-        if tax_codes:
-            fields["tax_codes"] = self._field(tax_codes, 0.82, "regex:tax_code", boxes, " ".join(tax_codes))
+        if self._needs_invoice_fields(document_type):
+            tax_codes = self._extract_tax_codes(lines)
+            if tax_codes:
+                fields["tax_codes"] = self._field(tax_codes, 0.82, "regex:tax_code", boxes, " ".join(tax_codes))
 
-        total_amount = self._extract_total_amount(lines, text)
-        if total_amount:
-            fields["total_amount"] = self._field(
-                total_amount["value"],
-                total_amount["confidence"],
-                total_amount["source"],
-                boxes,
-                total_amount["raw"],
-                {"raw": total_amount["raw"], "currency": total_amount["currency"]},
-            )
+            invoice_number = self._extract_invoice_number(lines)
+            if invoice_number:
+                fields["invoice_number"] = self._field(
+                    invoice_number["value"],
+                    invoice_number["confidence"],
+                    invoice_number["source"],
+                    boxes,
+                    invoice_number["source_text"],
+                )
 
-        invoice_number = self._extract_invoice_number(lines)
-        if invoice_number:
-            fields["invoice_number"] = self._field(
-                invoice_number["value"],
-                invoice_number["confidence"],
-                invoice_number["source"],
-                boxes,
-                invoice_number["source_text"],
-            )
+        if self._needs_financial_fields(document_type):
+            total_amount = self._extract_total_amount(lines, text)
+            if total_amount:
+                fields["total_amount"] = self._field(
+                    total_amount["value"],
+                    total_amount["confidence"],
+                    total_amount["source"],
+                    boxes,
+                    total_amount["raw"],
+                    {"raw": total_amount["raw"], "currency": total_amount["currency"]},
+                )
 
         parties = self._extract_parties(lines, document_type)
         fields.update(parties)
-        fields.update(self._extract_vietnamese_invoice_fields(lines, boxes, fields))
+        if self._needs_invoice_fields(document_type):
+            fields.update(self._extract_vietnamese_invoice_fields(lines, boxes, fields))
 
         return fields
 
@@ -460,6 +590,7 @@ class DocumentAgent:
         generic_kv: dict[str, Any],
         boxes: list[dict[str, Any]],
         existing_fields: dict[str, Any],
+        document_type: str,
     ) -> dict[str, Any]:
         fields = {}
         canonical_to_field = {
@@ -476,11 +607,17 @@ class DocumentAgent:
         for pair in generic_kv.get("key_values", []):
             canonical = pair.get("canonical")
             field_name = canonical_to_field.get(canonical)
-            if not field_name or field_name in existing_fields or field_name in fields:
+            if not field_name:
+                continue
+            if not self._field_allowed_for_document(field_name, document_type):
                 continue
 
             value = pair.get("display_value") or pair.get("value", "")
             if not value:
+                continue
+
+            existing_field = fields.get(field_name) or existing_fields.get(field_name)
+            if existing_field and not self._should_replace_with_generic_field(field_name, existing_field, pair):
                 continue
 
             fields[field_name] = self._field(
@@ -511,6 +648,211 @@ class DocumentAgent:
                 )
 
         return fields
+
+    def _fields_from_layoutxlm(
+        self,
+        layoutxlm_fields: dict[str, Any],
+        boxes: list[dict[str, Any]],
+        existing_fields: dict[str, Any],
+        document_type: str,
+    ) -> dict[str, Any]:
+        fields: dict[str, Any] = {}
+        if not isinstance(layoutxlm_fields, dict):
+            return fields
+
+        for field_name, candidate in layoutxlm_fields.items():
+            if not isinstance(candidate, dict):
+                continue
+            if not self._field_allowed_for_document(field_name, document_type):
+                continue
+
+            raw_value = candidate.get("value")
+            if self._is_empty_value(raw_value):
+                continue
+
+            value = raw_value
+            extra: dict[str, Any] = {
+                "layoutxlm_label": candidate.get("source", "").split(":")[-1],
+            }
+            if field_name == "total_amount":
+                parsed_amount = self._parse_amount(str(raw_value))
+                if parsed_amount is None:
+                    continue
+                value = parsed_amount
+                extra.update(
+                    {
+                        "raw": str(raw_value),
+                        "currency": self._detect_currency(str(raw_value)),
+                    }
+                )
+
+            confidence = self._safe_confidence(
+                candidate.get("confidence"),
+                default=0.55,
+            )
+            existing = fields.get(field_name) or existing_fields.get(field_name)
+            if existing and not self._should_replace_with_layoutxlm(
+                existing,
+                confidence,
+            ):
+                continue
+
+            fields[field_name] = self._field(
+                value,
+                confidence,
+                str(candidate.get("source") or "layoutxlm:token_classification"),
+                boxes,
+                str(raw_value),
+                extra,
+            )
+
+        return fields
+
+    def _fields_from_llm(
+        self,
+        llm_fields: dict[str, Any],
+        boxes: list[dict[str, Any]],
+        existing_fields: dict[str, Any],
+        document_type: str,
+    ) -> dict[str, Any]:
+        fields = {}
+        if not isinstance(llm_fields, dict):
+            return fields
+
+        for field_name, field in llm_fields.items():
+            normalized_name = self._normalize_dynamic_field_name(str(field_name))
+            if not normalized_name or normalized_name in existing_fields or normalized_name in fields:
+                continue
+            if not self._field_allowed_for_document(normalized_name, document_type):
+                continue
+
+            if isinstance(field, dict) and "value" in field:
+                value = field.get("value")
+                confidence = field.get("confidence", 0.62)
+                source = field.get("source", "llm:ocr_correction")
+            else:
+                value = field
+                confidence = 0.62
+                source = "llm:ocr_correction"
+
+            if self._is_empty_value(value):
+                continue
+
+            fields[normalized_name] = self._field(
+                value,
+                self._safe_confidence(confidence, default=0.62),
+                source,
+                boxes,
+                self._value_to_text(value),
+            )
+
+        return fields
+
+    def _should_replace_with_layoutxlm(
+        self,
+        existing_field: dict[str, Any],
+        candidate_confidence: float,
+    ) -> bool:
+        existing_confidence = self._safe_confidence(
+            existing_field.get("confidence"),
+            default=0.5,
+        )
+        existing_source = str(existing_field.get("source", ""))
+
+        if candidate_confidence >= 0.88 and existing_confidence <= 0.72:
+            return True
+        if (
+            existing_source.startswith("generic_kv:")
+            and candidate_confidence >= existing_confidence + 0.08
+        ):
+            return True
+        return False
+
+    def _needs_invoice_fields(self, document_type: str) -> bool:
+        return document_type == "invoice"
+
+    def _needs_financial_fields(self, document_type: str) -> bool:
+        return document_type in {"invoice", "receipt"}
+
+    def _field_allowed_for_document(self, field_name: str, document_type: str) -> bool:
+        invoice_only_fields = {
+            "invoice_number",
+            "invoice_form",
+            "invoice_symbol",
+            "tax_codes",
+            "amount_in_words",
+            "ma_so_thue",
+            "mst",
+            "so_hoa_don",
+            "hoa_don_so",
+            "mau_so",
+            "ky_hieu",
+            "so_tien_bang_chu",
+        }
+        financial_fields = {
+            "total_amount",
+            "payment_method",
+            "tong_tien",
+            "tong_cong",
+            "tong_thanh_toan",
+            "amount_due",
+            "balance_due",
+            "hinh_thuc_thanh_toan",
+            "phuong_thuc_thanh_toan",
+        }
+
+        if field_name in invoice_only_fields:
+            return self._needs_invoice_fields(document_type)
+        if field_name in financial_fields:
+            return self._needs_financial_fields(document_type)
+        return True
+
+    def _should_replace_with_generic_field(
+        self,
+        field_name: str,
+        existing_field: dict[str, Any],
+        pair: dict[str, Any],
+    ) -> bool:
+        source = str(pair.get("source", ""))
+        if not source.startswith(("section:", "layout:")):
+            return False
+
+        existing_value = existing_field.get("value")
+        if isinstance(existing_value, list):
+            return False
+
+        existing_text = str(existing_value or "").strip()
+        pair_text = str(pair.get("display_value") or pair.get("value", "")).strip()
+        if not pair_text:
+            return False
+        if not existing_text:
+            return True
+
+        normalized_existing = self._normalize(existing_text)
+        label_markers = {
+            "invoice",
+            "invoice #",
+            "invoice no",
+            "invoice number",
+            "date",
+            "due",
+            "terms",
+            "total",
+            "amount",
+            "qty",
+            "rate",
+            "bill to",
+            "ship to",
+            "payment method",
+        }
+
+        if field_name in {"buyer", "seller", "shipping_address", "billing_address"}:
+            return any(marker == normalized_existing or marker in normalized_existing for marker in label_markers)
+
+        if field_name == "invoice_number":
+            return any(char.isdigit() for char in pair_text) and not any(char.isdigit() for char in existing_text)
+
+        return False
 
     def _extract_vietnamese_invoice_fields(
         self,
@@ -725,6 +1067,16 @@ class DocumentAgent:
                 }
             )
 
+        if document_type == "invoice" and "invoice_number" not in fields:
+            warnings.append(
+                {
+                    "type": "missing_invoice_number",
+                    "message": "Chưa tìm thấy số hóa đơn.",
+                    "severity": "medium",
+                    "source_box_ids": [],
+                }
+            )
+
         return warnings
 
     def _low_confidence_words(self, structured_data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -830,6 +1182,37 @@ class DocumentAgent:
         if extra:
             field.update(extra)
         return field
+
+    def _normalize_dynamic_field_name(self, text: str) -> str:
+        normalized = self._normalize(text)
+        normalized = re.sub(r"[^\w\s-]", "", normalized, flags=re.UNICODE)
+        normalized = re.sub(r"[\s-]+", "_", normalized).strip("_")
+        return normalized[:80]
+
+    def _value_to_text(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (list, tuple)):
+            return " ".join(self._value_to_text(item) for item in value)
+        if isinstance(value, dict):
+            return " ".join(f"{key} {self._value_to_text(item)}" for key, item in value.items())
+        return str(value)
+
+    def _is_empty_value(self, value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return not value.strip()
+        if isinstance(value, (list, tuple, dict)):
+            return len(value) == 0
+        return False
+
+    def _safe_confidence(self, value: Any, default: float = 0.62) -> float:
+        try:
+            confidence = float(value)
+        except (TypeError, ValueError):
+            return default
+        return round(max(0.0, min(confidence, 1.0)), 2)
 
     def _box_ids_for_text(self, boxes: list[dict[str, Any]], text: str) -> list[str]:
         normalized_lookup = self._normalize(text)

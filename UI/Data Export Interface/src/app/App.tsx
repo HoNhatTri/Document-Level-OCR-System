@@ -1,17 +1,37 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Topbar } from "./components/Topbar";
 import { Sidebar } from "./components/Sidebar";
 import { DocumentViewer } from "./components/DocumentViewer";
 import { ResultsPanel } from "./components/ResultsPanel";
 import { UploadDialog } from "./components/UploadDialog";
+import { SettingsDialog, type AppSettings } from "./components/SettingsDialog";
 import { toast } from "sonner";
 import { Toaster } from "./components/ui/sonner";
+
+const DEFAULT_SETTINGS: AppSettings = {
+  image_preprocessing_enabled: true,
+  theme: "light",
+};
+
+function applyTheme(theme: AppSettings["theme"]) {
+  document.documentElement.classList.toggle("dark", theme === "dark");
+}
 
 export default function App() {
   // Quản lý danh sách file và dữ liệu từ API
   const [files, setFiles] = useState<any[]>([]);
   const [currentFileId, setCurrentFileId] = useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    const savedTheme = window.localStorage.getItem("ocr-ui-theme");
+    return {
+      ...DEFAULT_SETTINGS,
+      theme: savedTheme === "dark" ? "dark" : "light",
+    };
+  });
+  const [draftSettings, setDraftSettings] = useState<AppSettings>(settings);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   
   // Lưu trữ dữ liệu OCR bóc tách được cho từng file
   const [boundingBoxes, setBoundingBoxes] = useState<Record<string, any[]>>({});
@@ -21,6 +41,38 @@ export default function App() {
   const currentFile = files.find((f) => f.id === currentFileId);
   const currentBoundingBoxes = currentFileId ? boundingBoxes[currentFileId] || [] : [];
   const currentExtractedData = currentFileId ? extractedData[currentFileId] : null;
+
+  useEffect(() => {
+    applyTheme(settings.theme);
+  }, [settings.theme]);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await fetch("http://localhost:8000/api/settings");
+        if (!response.ok) return;
+        const data = await response.json();
+        const nextSettings: AppSettings = {
+          image_preprocessing_enabled: Boolean(data.image_preprocessing_enabled),
+          theme: data.theme === "dark" ? "dark" : "light",
+        };
+        setSettings(nextSettings);
+        setDraftSettings(nextSettings);
+        window.localStorage.setItem("ocr-ui-theme", nextSettings.theme);
+      } catch (error) {
+        console.warn("Khong the tai cai dat", error);
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  const handleSettingsOpenChange = (open: boolean) => {
+    if (open) {
+      setDraftSettings(settings);
+    }
+    setSettingsOpen(open);
+  };
 
   const handleExport = async (format: string) => {
     if (!currentFile || !currentExtractedData) {
@@ -132,8 +184,31 @@ export default function App() {
     }
   };
 
-  const handleSettings = () => {
-    toast.info("Tính năng cài đặt đang được phát triển");
+  const handleSaveSettings = async () => {
+    setIsSavingSettings(true);
+    try {
+      const response = await fetch("http://localhost:8000/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draftSettings),
+      });
+      if (!response.ok) throw new Error("Khong the luu cai dat");
+      const saved = await response.json();
+      const nextSettings: AppSettings = {
+        image_preprocessing_enabled: Boolean(saved.image_preprocessing_enabled),
+        theme: saved.theme === "dark" ? "dark" : "light",
+      };
+      setSettings(nextSettings);
+      setDraftSettings(nextSettings);
+      window.localStorage.setItem("ocr-ui-theme", nextSettings.theme);
+      setSettingsOpen(false);
+      toast.success("Đã lưu cài đặt");
+    } catch (error) {
+      toast.error("Không thể lưu cài đặt");
+      console.error(error);
+    } finally {
+      setIsSavingSettings(false);
+    }
   };
 
   const handleBoxClick = (box: any) => {
@@ -141,7 +216,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-white">
+    <div className="h-screen flex flex-col bg-background text-foreground">
       <Toaster />
       
       <Topbar 
@@ -155,7 +230,7 @@ export default function App() {
           currentFileId={currentFileId}
           onFileSelect={setCurrentFileId}
           onUpload={() => setUploadDialogOpen(true)}
-          onSettings={handleSettings}
+          onSettings={() => handleSettingsOpenChange(true)}
         />
 
         <div className="flex-1 flex overflow-hidden">
@@ -181,6 +256,15 @@ export default function App() {
         open={uploadDialogOpen}
         onOpenChange={setUploadDialogOpen}
         onUpload={handleUpload}
+      />
+
+      <SettingsDialog
+        open={settingsOpen}
+        settings={draftSettings}
+        isSaving={isSavingSettings}
+        onOpenChange={handleSettingsOpenChange}
+        onSettingsChange={setDraftSettings}
+        onSave={handleSaveSettings}
       />
     </div>
   );
