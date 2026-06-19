@@ -3,6 +3,8 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 from uuid import uuid4
+import base64
+import os
 
 from docx import Document
 from docx.oxml.ns import qn
@@ -99,6 +101,15 @@ async def upload_document(file: UploadFile = File(...)):
             shutil.copyfileobj(file.file, buffer)
 
         raw_result = engine.process_document(str(temp_file_path))
+
+        processed_temp_path = getattr(engine, 'current_processed_image_path', None)
+        base64_image = ""
+        
+        if processed_temp_path and os.path.exists(processed_temp_path):
+            with open(processed_temp_path, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+                base64_image = f"data:image/jpeg;base64,{encoded_string}"
+
     except Exception as exc:
         if temp_file_path.exists():
             temp_file_path.unlink()
@@ -106,6 +117,17 @@ async def upload_document(file: UploadFile = File(...)):
             status_code=500,
             detail=f"Khong the xu ly OCR: {exc}",
         ) from exc
+
+    finally:
+        if temp_file_path.exists():
+            temp_file_path.unlink()
+            
+        processed_temp_path_obj = Path(getattr(engine, 'current_processed_image_path', "")) if getattr(engine, 'current_processed_image_path', None) else None
+        if processed_temp_path_obj and processed_temp_path_obj.exists() and processed_temp_path_obj != temp_file_path:
+            try:
+                processed_temp_path_obj.unlink()
+            except OSError:
+                pass
 
     structured_data = engine.get_structured_data(raw_result)
     structured_data["_processing"] = engine.get_processing_info()
@@ -123,9 +145,6 @@ async def upload_document(file: UploadFile = File(...)):
     )
     ai_analysis["layout_regions"] = layout_regions
 
-    if temp_file_path.exists():
-        temp_file_path.unlink()
-
     return {
         "status": "success",
         "filename": file.filename,
@@ -135,6 +154,7 @@ async def upload_document(file: UploadFile = File(...)):
         "layout_regions": layout_regions,
         "ai_analysis": ai_analysis,
         "bounding_boxes": bounding_boxes,
+        "processed_image_base64": base64_image
     }
 
 

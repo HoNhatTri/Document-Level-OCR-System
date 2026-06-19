@@ -2,8 +2,11 @@
 ocr:
   detector: "db_resnet50"       # Mô hình khoanh vùng chữ (Detection)
   #detector: "linknet_resnet50"
-  recognizer: "crnn_vgg16_bn"      # Mô hình nhận diện chữ (Recognition)
-  #recognizer: "parseq"
+  #recognizer: "crnn_vgg16_bn"      # Mô hình nhận diện chữ (Recognition)
+  recognizer: "parseq"
   pretrained: true              # Sử dụng trọng số đã huấn luyện sẵn
-  device: "cpu"
+  #device: "cpu"
   #device: "cuda" 
+
+  custom_weights: "models/parseq_BEST.pt"
+  custom_vocab: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝàáâãèéêìíòóôõùúýĂăĐđĨĩŨũƠơƯưẠạẢảẤấẦầẨẩẪẫẬậẮắẰằẲẳẴẵẶặẸẹẺẻẼẽẾếỀềỂểỄễỆệỈỉỊịỌọỎỏỐốỒồỔổỖỗỘộỚớỜờỞởỠỡỢợỤụỦủỨứỪừỬửỮữỰựỲỳỴỵỶỷỸỹ!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~° "
