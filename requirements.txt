@@ -8,3 +8,7 @@ reportlab
 python-docx
 python-dotenv
 groq
+kagglehub
+torch
+torchvision
+matplotlib

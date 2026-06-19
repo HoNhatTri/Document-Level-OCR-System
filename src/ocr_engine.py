@@ -1,7 +1,9 @@
 import yaml
 import os
+import torch
 from doctr.io import DocumentFile
 from doctr.models import ocr_predictor
+from doctr import models as doctr_models
 
 class OCREngine:
     def __init__(self, config_path="configs/model_config.yaml"):
@@ -13,13 +15,41 @@ class OCREngine:
         print(f"[*] Đang tải mô hình OCR...")
         print(f"    - Detector: {config['detector']}")
         print(f"    - Recognizer: {config['recognizer']}")
+
+        custom_weights_path = config.get('custom_weights')
+        custom_vocab = config.get('custom_vocab')
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        if custom_weights_path and os.path.exists(custom_weights_path) and custom_vocab:
+            print(f"    -> [INFO] Phát hiện trọng số tùy chỉnh tại: {custom_weights_path}")
+            
+            recognizer_name = config['recognizer']
+            model_constructor = getattr(doctr_models, recognizer_name)
+            custom_reco_model = model_constructor(pretrained=False, vocab=custom_vocab)
+            
+            state_dict = torch.load(custom_weights_path, map_location=device)
+            custom_reco_model.load_state_dict(state_dict)
+            custom_reco_model.to(device)
+            custom_reco_model.eval()
+            
+            self.model = ocr_predictor(
+                det_arch=config['detector'],
+                reco_arch=custom_reco_model, 
+                pretrained=True
+            )
+            print("    -> [INFO] Đã nạp thành công bộ nhận diện Tiếng Việt!")
+            
+        else:
+            # Nếu không tìm thấy file .pt, fallback về mô hình mặc định của docTR
+            print("    -> [WARNING] Không dùng trọng số tùy chỉnh, tải bản mặc định.")
+            self.model = ocr_predictor(
+                det_arch=config['detector'],
+                reco_arch=config['recognizer'],
+                pretrained=config['pretrained']
+            )
         
         # Khởi tạo docTR với các kiến trúc đã chọn trong config
-        self.model = ocr_predictor(
-            det_arch=config['detector'],
-            reco_arch=config['recognizer'],
-            pretrained=config['pretrained']
-        )
+        self.model.to(device)
         print("[+] Khởi tạo mô hình thành công!\n")
 
     def process_document(self, file_path):
