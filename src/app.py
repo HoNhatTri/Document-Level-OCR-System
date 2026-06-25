@@ -24,6 +24,7 @@ from src.ocr_engine import OCREngine
 from src.reading_order import ordered_lines_from_structured, raw_text_from_structured, word_rows_from_structured
 from src.settings import get_settings, save_settings
 from src.table_extractor import TableExtractor
+from src.vie_text_corrector import TextCorrector
 
 app = FastAPI()
 
@@ -64,6 +65,7 @@ engine = OCREngine(config_path="configs/model_config.yaml")
 agent = DocumentAgent()
 layout_analyzer = LayoutAnalyzer()
 table_extractor = TableExtractor()
+text_corrector = TextCorrector()
 
 
 @app.get("/api/settings")
@@ -132,6 +134,7 @@ async def upload_document(file: UploadFile = File(...)):
     structured_data = engine.get_structured_data(raw_result)
     structured_data["_processing"] = engine.get_processing_info()
     extracted_text = engine.get_raw_text(raw_result, structured_data=structured_data)
+    extracted_text = text_corrector.correct_document(extracted_text)
     tables = table_extractor.extract_tables(structured_data)
     layout_regions = layout_analyzer.analyze(structured_data, tables=tables)
     bounding_boxes = engine.get_bounding_boxes(structured_data)
