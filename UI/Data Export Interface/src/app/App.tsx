@@ -5,6 +5,8 @@ import { DocumentViewer } from "./components/DocumentViewer";
 import { ResultsPanel } from "./components/ResultsPanel";
 import { UploadDialog } from "./components/UploadDialog";
 import { SettingsDialog, type AppSettings } from "./components/SettingsDialog";
+import { MonitoringDialog } from "./components/MonitoringDialog";
+import { apiUrl } from "./api";
 import { toast } from "sonner";
 import { Toaster } from "./components/ui/sonner";
 
@@ -23,6 +25,7 @@ export default function App() {
   const [currentFileId, setCurrentFileId] = useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [monitoringOpen, setMonitoringOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(() => {
     const savedTheme = window.localStorage.getItem("ocr-ui-theme");
     return {
@@ -49,7 +52,7 @@ export default function App() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const response = await fetch("http://localhost:8000/api/settings");
+        const response = await fetch(apiUrl("/api/settings"));
         if (!response.ok) return;
         const data = await response.json();
         const nextSettings: AppSettings = {
@@ -85,7 +88,7 @@ export default function App() {
       try {
         const endpoint = format === "pdf" ? "export-pdf" : "export-docx";
         
-        const response = await fetch(`http://localhost:8000/api/${endpoint}`, {
+        const response = await fetch(apiUrl(`/api/${endpoint}`), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(currentExtractedData.json),
@@ -135,7 +138,7 @@ export default function App() {
 
     try {
       // GỌI API ĐẾN BACKEND PYTHON
-      const response = await fetch("http://localhost:8000/api/upload", {
+      const response = await fetch(apiUrl("/api/upload"), {
         method: "POST",
         body: formData,
       });
@@ -187,7 +190,7 @@ export default function App() {
   const handleSaveSettings = async () => {
     setIsSavingSettings(true);
     try {
-      const response = await fetch("http://localhost:8000/api/settings", {
+      const response = await fetch(apiUrl("/api/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(draftSettings),
@@ -231,6 +234,7 @@ export default function App() {
           onFileSelect={setCurrentFileId}
           onUpload={() => setUploadDialogOpen(true)}
           onSettings={() => handleSettingsOpenChange(true)}
+          onMonitoring={() => setMonitoringOpen(true)}
         />
 
         <div className="flex-1 flex overflow-hidden">
@@ -265,6 +269,11 @@ export default function App() {
         onOpenChange={handleSettingsOpenChange}
         onSettingsChange={setDraftSettings}
         onSave={handleSaveSettings}
+      />
+
+      <MonitoringDialog
+        open={monitoringOpen}
+        onOpenChange={setMonitoringOpen}
       />
     </div>
   );

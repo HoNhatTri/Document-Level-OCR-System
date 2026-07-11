@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
+import { apiUrl } from "../api";
 
 interface AIField {
   value: any;
@@ -106,6 +107,7 @@ interface ChatMessage {
 
 function formatConfidence(value?: number) {
   if (typeof value !== "number") return "";
+  if (value <= 0) return "ước lượng";
   return `${Math.round(value * 100)}%`;
 }
 
@@ -234,7 +236,7 @@ export function ResultsPanel({ data }: ResultsPanelProps) {
     setIsAsking(true);
 
     try {
-      const response = await fetch("http://localhost:8000/api/chat", {
+      const response = await fetch(apiUrl("/api/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

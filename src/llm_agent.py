@@ -44,7 +44,7 @@ class OptionalLLMAgent:
         try:
             from groq import Groq
         except ImportError:
-            self.disabled_reason = "Package 'groq' is not installed. Run pip install -r requirements.txt."
+            self.disabled_reason = "Package 'groq' is not installed. Run python -m pip install -r requirements.txt."
             return
 
         self.client = Groq(api_key=api_key)
@@ -206,7 +206,7 @@ Return valid JSON:
   "fields": {{
     "field_name": {{
       "value": "visible value",
-      "confidence": 0.0,
+      "confidence": 0.62,
       "source": "llm:ocr_correction"
     }}
   }},
@@ -287,6 +287,8 @@ Raw OCR text:
         try:
             confidence = float(value)
         except (TypeError, ValueError):
+            return 0.62
+        if confidence <= 0:
             return 0.62
         return round(max(0.0, min(confidence, 1.0)), 2)
 

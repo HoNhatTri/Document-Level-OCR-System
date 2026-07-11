@@ -1,4 +1,5 @@
 import shutil
+import time
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -18,6 +19,7 @@ from reportlab.pdfgen import canvas
 
 from src.agent import DocumentAgent
 from src.layout_analyzer import LayoutAnalyzer
+from src.monitoring import SystemMonitor, estimate_ocr_quality
 from src.ocr_engine import OCREngine
 from src.reading_order import ordered_lines_from_structured, raw_text_from_structured, word_rows_from_structured
 from src.settings import get_settings, save_settings
@@ -62,6 +64,54 @@ engine = OCREngine(config_path="configs/model_config.yaml")
 agent = DocumentAgent()
 layout_analyzer = LayoutAnalyzer()
 table_extractor = TableExtractor()
+monitor = SystemMonitor()
+
+
+@app.middleware("http")
+async def collect_request_metrics(request, call_next):
+    start_time = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        monitor.record_request(
+            method=request.method,
+            path=request.url.path,
+            status_code=status_code,
+            latency_ms=latency_ms,
+        )
+
+
+def _service_status() -> dict[str, Any]:
+    return {
+        "ocr": {
+            "status": "ready",
+            "detector": getattr(engine.model, "det_predictor", None).__class__.__name__
+            if getattr(engine, "model", None)
+            else "unknown",
+        },
+        "llm": agent.llm_agent.status(),
+        "layoutxlm": agent.layoutxlm_extractor.status(),
+        "settings": get_settings(),
+    }
+
+
+@app.get("/api/health")
+async def health_check():
+    return monitor.health(services=_service_status())
+
+
+@app.get("/api/monitoring")
+async def monitoring_snapshot():
+    return monitor.snapshot(services=_service_status())
+
+
+@app.get("/api/metrics")
+async def metrics_snapshot():
+    return monitor.snapshot(services=_service_status())
 
 
 @app.get("/api/settings")
@@ -81,6 +131,7 @@ async def layoutxlm_status():
 
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
+    upload_start = time.perf_counter()
     original_filename = file.filename or "upload"
     extension = Path(original_filename).suffix.lower()
     allowed_extensions = {".jpg", ".jpeg", ".png", ".pdf"}
@@ -122,6 +173,19 @@ async def upload_document(file: UploadFile = File(...)):
         page_images=page_images,
     )
     ai_analysis["layout_regions"] = layout_regions
+    quality = estimate_ocr_quality(
+        structured_data=structured_data,
+        extracted_text=extracted_text,
+        ai_analysis=ai_analysis,
+    )
+    ai_analysis["ocr_quality"] = quality
+    monitor.record_ocr_run(
+        filename=original_filename,
+        document_type=ai_analysis.get("document_type", "unknown"),
+        duration_ms=(time.perf_counter() - upload_start) * 1000,
+        quality=quality,
+        ai_analysis=ai_analysis,
+    )
 
     if temp_file_path.exists():
         temp_file_path.unlink()

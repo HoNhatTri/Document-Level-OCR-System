@@ -1,4 +1,4 @@
-import { Upload, Clock, Settings, FileText } from "lucide-react";
+import { Upload, Clock, Settings, FileText, Activity } from "lucide-react";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import { cn } from "./ui/utils";
@@ -16,9 +16,10 @@ interface SidebarProps {
   onFileSelect: (id: string) => void;
   onUpload: () => void;
   onSettings: () => void;
+  onMonitoring: () => void;
 }
 
-export function Sidebar({ files, currentFileId, onFileSelect, onUpload, onSettings }: SidebarProps) {
+export function Sidebar({ files, currentFileId, onFileSelect, onUpload, onSettings, onMonitoring }: SidebarProps) {
   return (
     <div className="w-64 border-r bg-gray-50 flex flex-col">
       <div className="p-4">
@@ -74,6 +75,14 @@ export function Sidebar({ files, currentFileId, onFileSelect, onUpload, onSettin
       </ScrollArea>
 
       <div className="p-4 border-t">
+        <Button
+          onClick={onMonitoring}
+          variant="ghost"
+          className="w-full justify-start gap-2"
+        >
+          <Activity className="size-4" />
+          Giám sát
+        </Button>
         <Button
           onClick={onSettings}
           variant="ghost"

@@ -5,6 +5,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.venv-linux/
 venv/
 
 # Secrets and local environment
@@ -18,8 +19,10 @@ dist/
 build/
 
 # OCR and ML model artifacts
-model/
-models/
+model/*
+!model/README.md
+models/*
+!models/README.md
 checkpoints/
 checkpoint-*/
 runs/

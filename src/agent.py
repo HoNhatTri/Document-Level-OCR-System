@@ -132,6 +132,16 @@ class DocumentAgent:
             if isinstance(layoutxlm_analysis, dict)
             else {}
         )
+        layoutxlm_fields, rejected_layoutxlm_fields = self._filter_layoutxlm_fields(
+            layoutxlm_fields,
+            document_type,
+        )
+        if isinstance(layoutxlm_analysis, dict):
+            layoutxlm_analysis = dict(layoutxlm_analysis)
+            if rejected_layoutxlm_fields:
+                layoutxlm_analysis["raw_fields"] = layoutxlm_analysis.get("fields", {})
+                layoutxlm_analysis["rejected_fields"] = rejected_layoutxlm_fields
+            layoutxlm_analysis["fields"] = layoutxlm_fields
         fields.update(
             self._fields_from_layoutxlm(
                 layoutxlm_fields,
@@ -218,6 +228,23 @@ class DocumentAgent:
 
         for keywords, field_name in field_lookup:
             if any(keyword in normalized_question for keyword in keywords):
+                direct_generic_answer = self.kv_extractor.answer_from_question(question_text, generic_kv)
+                if direct_generic_answer and self._generic_answer_matches_field(direct_generic_answer, field_name):
+                    return direct_generic_answer
+
+                generic_answer = self._answer_field_from_generic_kv(field_name, generic_kv)
+                if generic_answer:
+                    return generic_answer
+                fallback_answer = self._answer_field_from_lines(field_name, lines)
+                if fallback_answer:
+                    return fallback_answer
+                llm_field_answer = self._answer_field_from_llm_fields(
+                    field_name,
+                    current_analysis,
+                    fields.get(field_name),
+                )
+                if llm_field_answer:
+                    return llm_field_answer
                 field = fields.get(field_name)
                 if field:
                     return {
@@ -225,12 +252,6 @@ class DocumentAgent:
                         "matched_field": field_name,
                         "source_box_ids": field.get("source_box_ids", []),
                     }
-                fallback_answer = self._answer_field_from_lines(field_name, lines)
-                if fallback_answer:
-                    return fallback_answer
-                generic_answer = self._answer_field_from_generic_kv(field_name, generic_kv)
-                if generic_answer:
-                    return generic_answer
 
         if any(keyword in normalized_question for keyword in ["tom tat", "tom luoc", "summary", "noi dung chinh", "noi dung", "noi ve"]):
             return {
@@ -585,6 +606,24 @@ class DocumentAgent:
             "source_box_ids": pair.get("source_box_ids", []),
         }
 
+    def _generic_answer_matches_field(self, answer: dict[str, Any], field_name: str) -> bool:
+        matched_field = answer.get("matched_field")
+        if matched_field == field_name:
+            return True
+        if matched_field != "generic_kv":
+            return False
+
+        # Generic answers without a canonical field are accepted only for
+        # fields where the question text directly matched a detected label.
+        return field_name in {
+            "total_amount",
+            "primary_date",
+            "tax_codes",
+            "emails",
+            "phone_numbers",
+            "amount_in_words",
+        }
+
     def _fields_from_generic_kv(
         self,
         generic_kv: dict[str, Any],
@@ -708,6 +747,116 @@ class DocumentAgent:
 
         return fields
 
+    def _filter_layoutxlm_fields(
+        self,
+        layoutxlm_fields: dict[str, Any],
+        document_type: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        valid_fields: dict[str, Any] = {}
+        rejected_fields: dict[str, Any] = {}
+        if not isinstance(layoutxlm_fields, dict):
+            return valid_fields, rejected_fields
+
+        for field_name, candidate in layoutxlm_fields.items():
+            if not isinstance(candidate, dict):
+                continue
+            if not self._field_allowed_for_document(field_name, document_type):
+                continue
+
+            reason = self._layoutxlm_rejection_reason(field_name, candidate.get("value"))
+            if reason:
+                rejected_candidate = dict(candidate)
+                rejected_candidate["rejection_reason"] = reason
+                rejected_fields[field_name] = rejected_candidate
+                continue
+
+            valid_fields[field_name] = candidate
+
+        return valid_fields, rejected_fields
+
+    def _layoutxlm_rejection_reason(self, field_name: str, value: Any) -> str:
+        if self._is_empty_value(value):
+            return "empty_value"
+
+        text = str(value).strip()
+        normalized = self._normalize(text)
+        if self._is_layoutxlm_label_like_value(normalized):
+            return "label_like_value"
+
+        if field_name == "primary_date":
+            if not self._looks_like_date_value(text):
+                return "invalid_date_format"
+            return ""
+
+        if field_name == "total_amount":
+            parsed = self._parse_amount(text)
+            if parsed is None or float(parsed) <= 0:
+                return "invalid_amount"
+            return ""
+
+        if field_name == "invoice_number":
+            if len(text) < 2 or not any(char.isalnum() for char in text):
+                return "invalid_invoice_number"
+            return ""
+
+        if field_name in {
+            "seller",
+            "buyer",
+            "seller_address",
+            "buyer_address",
+            "shipping_address",
+            "billing_address",
+        }:
+            alpha_count = sum(char.isalpha() for char in text)
+            if len(text) < 3 or alpha_count < 2:
+                return "too_short_or_numeric"
+            return ""
+
+        return ""
+
+    def _is_layoutxlm_label_like_value(self, normalized: str) -> bool:
+        label_values = {
+            "date",
+            "invoice",
+            "invoice date",
+            "due date",
+            "invoice due date",
+            "invoice #",
+            "invoice no",
+            "invoice number",
+            "bill to",
+            "ship to",
+            "seller",
+            "buyer",
+            "address",
+            "total",
+            "subtotal",
+            "sub total",
+            "amount",
+            "amount due",
+            "balance due",
+            "tax",
+            "rate",
+            "qty",
+        }
+        return normalized in label_values
+
+    def _looks_like_date_value(self, text: str) -> bool:
+        if self.DATE_RE.search(text):
+            return True
+
+        normalized = self._normalize(text)
+        months = (
+            "jan|january|feb|february|mar|march|apr|april|may|jun|june|"
+            "jul|july|aug|august|sep|sept|september|oct|october|"
+            "nov|november|dec|december"
+        )
+        return bool(
+            re.search(rf"\b\d{{1,2}}\s+(?:{months})\s+\d{{2,4}}\b", normalized)
+            or re.search(rf"\b(?:{months})\s+\d{{1,2}},?\s+\d{{2,4}}\b", normalized)
+            or re.search(r"\b\d{1,2}\s+thang\s+\d{1,2}\s+\d{2,4}\b", normalized)
+        )
+
     def _fields_from_llm(
         self,
         llm_fields: dict[str, Any],
@@ -721,7 +870,7 @@ class DocumentAgent:
 
         for field_name, field in llm_fields.items():
             normalized_name = self._normalize_dynamic_field_name(str(field_name))
-            if not normalized_name or normalized_name in existing_fields or normalized_name in fields:
+            if not normalized_name or normalized_name in fields:
                 continue
             if not self._field_allowed_for_document(normalized_name, document_type):
                 continue
@@ -738,15 +887,138 @@ class DocumentAgent:
             if self._is_empty_value(value):
                 continue
 
+            raw_value = value
+            extra: dict[str, Any] = {}
+            if normalized_name == "total_amount":
+                parsed_amount = self._parse_amount(str(value))
+                if parsed_amount is None:
+                    continue
+                value = parsed_amount
+                extra.update(
+                    {
+                        "raw": str(raw_value),
+                        "currency": self._detect_currency(str(raw_value)),
+                    }
+                )
+
+            confidence = self._safe_llm_confidence(confidence, default=0.62)
+            existing = existing_fields.get(normalized_name)
+            if existing and not self._should_replace_with_llm(
+                normalized_name,
+                existing,
+                value,
+                confidence,
+            ):
+                continue
+
             fields[normalized_name] = self._field(
                 value,
-                self._safe_confidence(confidence, default=0.62),
+                confidence,
                 source,
                 boxes,
-                self._value_to_text(value),
+                self._value_to_text(raw_value),
+                extra,
             )
 
         return fields
+
+    def _answer_field_from_llm_fields(
+        self,
+        field_name: str,
+        analysis: dict[str, Any],
+        existing_field: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        llm_fields = analysis.get("llm_fields")
+        if not isinstance(llm_fields, dict):
+            llm = analysis.get("llm") or {}
+            llm_fields = llm.get("fields") if isinstance(llm, dict) else {}
+        if not isinstance(llm_fields, dict):
+            return None
+
+        candidate = None
+        for raw_name, raw_field in llm_fields.items():
+            if self._normalize_dynamic_field_name(str(raw_name)) == field_name:
+                candidate = raw_field
+                break
+        if candidate is None:
+            return None
+
+        if isinstance(candidate, dict) and "value" in candidate:
+            value = candidate.get("value")
+            confidence = self._safe_llm_confidence(candidate.get("confidence"), default=0.62)
+            source = str(candidate.get("source") or "llm:ocr_correction")
+        else:
+            value = candidate
+            confidence = 0.62
+            source = "llm:ocr_correction"
+
+        if self._is_empty_value(value):
+            return None
+
+        display_value = value
+        if field_name == "total_amount":
+            parsed_amount = self._parse_amount(str(value))
+            if parsed_amount is None:
+                return None
+            display_value = parsed_amount
+
+        if existing_field and not self._should_replace_with_llm(
+            field_name,
+            existing_field,
+            display_value,
+            confidence,
+        ):
+            return None
+
+        answer_field = {
+            "value": display_value,
+            "confidence": confidence,
+            "source": source,
+            "source_box_ids": [],
+        }
+        if field_name == "total_amount":
+            answer_field["currency"] = self._detect_currency(str(value))
+        return {
+            "answer": self._humanize_field(field_name, answer_field),
+            "matched_field": field_name,
+            "source_box_ids": [],
+        }
+
+    def _should_replace_with_llm(
+        self,
+        field_name: str,
+        existing_field: dict[str, Any],
+        candidate_value: Any,
+        candidate_confidence: float,
+    ) -> bool:
+        existing_confidence = self._safe_confidence(existing_field.get("confidence"), default=0.5)
+        existing_source = str(existing_field.get("source", ""))
+        existing_value = existing_field.get("value")
+
+        if field_name == "total_amount" and existing_source == "regex:largest_amount":
+            return True
+        if existing_confidence <= 0.56 and candidate_confidence >= 0.55:
+            return True
+        if field_name == "invoice_number" and existing_source.startswith("regex:"):
+            existing_text = self._normalize(str(existing_value or ""))
+            candidate_text = str(candidate_value or "")
+            label_like_values = {"date", "invoice", "invoice date", "due date", "no", "number"}
+            if existing_text in label_like_values and any(char.isdigit() for char in candidate_text):
+                return True
+            if not any(char.isdigit() for char in str(existing_value or "")) and any(char.isdigit() for char in candidate_text):
+                return True
+
+        if existing_source.startswith("layoutxlm:") and candidate_confidence >= 0.55:
+            if self._layoutxlm_rejection_reason(field_name, existing_value):
+                return True
+            if field_name == "total_amount" and existing_confidence <= 0.8:
+                return True
+            if field_name in {"primary_date", "invoice_number"} and existing_confidence <= 0.75:
+                return True
+
+        if existing_source.startswith("llm:"):
+            return candidate_confidence >= existing_confidence
+        return False
 
     def _should_replace_with_layoutxlm(
         self,
@@ -1213,6 +1485,12 @@ class DocumentAgent:
         except (TypeError, ValueError):
             return default
         return round(max(0.0, min(confidence, 1.0)), 2)
+
+    def _safe_llm_confidence(self, value: Any, default: float = 0.62) -> float:
+        confidence = self._safe_confidence(value, default=default)
+        if confidence <= 0:
+            return default
+        return confidence
 
     def _box_ids_for_text(self, boxes: list[dict[str, Any]], text: str) -> list[str]:
         normalized_lookup = self._normalize(text)

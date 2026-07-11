@@ -52,6 +52,70 @@ class FakeInvoiceFieldLLMAgent:
         return None
 
 
+class FakeTotalCorrectionLLMAgent:
+    def analyze(self, extracted_text, base_analysis=None, generic_kv=None):
+        return {
+            "status": "ok",
+            "provider": "fake",
+            "model": "fake-model",
+            "summary": "",
+            "full_corrected_text": "",
+            "fields": {
+                "total_amount": {
+                    "value": "154.06",
+                    "confidence": 0,
+                    "source": "llm:ocr_correction",
+                }
+            },
+            "agent_trace": [],
+        }
+
+    def answer_question(self, question, extracted_text, analysis=None, generic_kv=None):
+        return None
+
+
+class FakeInvoiceCorrectionLLMAgent:
+    def analyze(self, extracted_text, base_analysis=None, generic_kv=None):
+        return {
+            "status": "ok",
+            "provider": "fake",
+            "model": "fake-model",
+            "summary": "",
+            "full_corrected_text": "",
+            "fields": {
+                "primary_date": {
+                    "value": "2023-05-15",
+                    "confidence": 0,
+                    "source": "llm:ocr_correction",
+                },
+                "invoice_number": {
+                    "value": "12345",
+                    "confidence": 0,
+                    "source": "llm:ocr_correction",
+                },
+                "seller": {
+                    "value": "Jane Doe",
+                    "confidence": 0,
+                    "source": "llm:ocr_correction",
+                },
+                "buyer": {
+                    "value": "ABC Salon",
+                    "confidence": 0,
+                    "source": "llm:ocr_correction",
+                },
+                "total_amount": {
+                    "value": "$180",
+                    "confidence": 0,
+                    "source": "llm:ocr_correction",
+                },
+            },
+            "agent_trace": [],
+        }
+
+    def answer_question(self, question, extracted_text, analysis=None, generic_kv=None):
+        return None
+
+
 class FakeLayoutXLMExtractor:
     def extract(self, page_images, structured_data, document_type):
         return {
@@ -69,6 +133,34 @@ class FakeLayoutXLMExtractor:
                     "value": "14B Northern Street",
                     "confidence": 0.9,
                     "source": "layoutxlm:address",
+                },
+            },
+            "entities": [],
+        }
+
+
+class FakeInvalidLayoutXLMExtractor:
+    def extract(self, page_images, structured_data, document_type):
+        return {
+            "status": "ok",
+            "model": "fake-layoutxlm",
+            "device": "cpu",
+            "message": "fake extraction",
+            "fields": {
+                "primary_date": {
+                    "value": "1",
+                    "confidence": 1.0,
+                    "source": "layoutxlm:date",
+                },
+                "seller_address": {
+                    "value": "456",
+                    "confidence": 0.95,
+                    "source": "layoutxlm:address",
+                },
+                "total_amount": {
+                    "value": "$50",
+                    "confidence": 0.71,
+                    "source": "layoutxlm:total",
                 },
             },
             "entities": [],
@@ -313,6 +405,90 @@ def test_agent_answers_unknown_label_from_generic_kv():
     assert answer["answer"] == "ZX-42"
 
 
+def test_agent_qa_prefers_generic_kv_over_wrong_extracted_field():
+    agent = DocumentAgent()
+    analysis = {
+        "fields": {
+            "invoice_number": {
+                "value": "0000001",
+                "confidence": 0.9,
+                "source": "rule:test",
+                "source_box_ids": [],
+            }
+        },
+        "summary": "",
+        "generic_kv": {
+            "key_values": [
+                {
+                    "label": "Invoice #",
+                    "normalized_label": "invoice #",
+                    "value": "INV-000001",
+                    "display_value": "INV-000001",
+                    "canonical": "invoice_number",
+                    "source": "layout:same_row",
+                    "source_box_ids": [],
+                    "confidence": 0.72,
+                }
+            ],
+            "sections": [],
+        },
+    }
+
+    answer = agent.answer_question(
+        "Số hóa đơn là gì?",
+        "Invoice # INV-000001",
+        analysis=analysis,
+    )
+
+    assert answer["matched_field"] == "invoice_number"
+    assert answer["answer"] == "INV-000001"
+
+
+def test_agent_qa_prefers_llm_total_over_weak_largest_amount_field():
+    agent = DocumentAgent()
+    analysis = {
+        "fields": {
+            "total_amount": {
+                "value": 19191,
+                "confidence": 0.55,
+                "source": "regex:largest_amount",
+                "source_box_ids": ["27"],
+                "raw": "019 191",
+            }
+        },
+        "summary": "",
+        "generic_kv": {"key_values": [], "sections": []},
+        "llm_fields": {
+            "total_amount": {
+                "value": "154.06",
+                "confidence": 0,
+                "source": "llm:ocr_correction",
+            }
+        },
+    }
+
+    answer = agent.answer_question(
+        "Tổng tiền trong hóa đơn là bao nhiêu?",
+        "Invoice total 154.06",
+        analysis=analysis,
+    )
+
+    assert answer["matched_field"] == "total_amount"
+    assert "154.06" in answer["answer"]
+
+
+def test_agent_llm_replaces_weak_largest_amount_field_during_analysis():
+    agent = DocumentAgent(llm_agent=FakeTotalCorrectionLLMAgent())
+
+    result = agent.analyze(
+        "Invoice # US-001\nBill To John Smith\nAmount Due 154.06\nNoise 019 191"
+    )
+
+    assert result["fields"]["total_amount"]["value"] == 154.06
+    assert result["fields"]["total_amount"]["source"] == "llm:ocr_correction"
+    assert result["fields"]["total_amount"]["confidence"] == 0.62
+
+
 def test_agent_merges_supplemental_llm_fields_without_api_call():
     agent = DocumentAgent(llm_agent=FakeLLMAgent())
 
@@ -367,3 +543,32 @@ def test_agent_merges_layoutxlm_fields_without_replacing_pipeline():
     assert result["fields"]["seller"]["value"] == "Zylker Electronics Hub"
     assert result["fields"]["seller"]["source"] == "layoutxlm:company"
     assert result["fields"]["seller_address"]["value"] == "14B Northern Street"
+
+
+def test_agent_rejects_invalid_layoutxlm_fields_and_lets_llm_correct():
+    agent = DocumentAgent(
+        llm_agent=FakeInvoiceCorrectionLLMAgent(),
+        layoutxlm_extractor=FakeInvalidLayoutXLMExtractor(),
+    )
+    text = """
+    INVOICE # 12345
+    Invoice Date 2023-05-15
+    Seller Jane Doe
+    Bill To ABC Salon
+    Amount Due $180
+    Balance Due $180
+    Tax Rate 0%
+    """
+
+    result = agent.analyze(
+        text,
+        structured_data={"pages": []},
+        page_images=[object()],
+    )
+
+    assert "primary_date" not in result["layoutxlm_fields"]
+    assert "seller_address" not in result["layoutxlm_fields"]
+    assert result["layoutxlm"]["rejected_fields"]["primary_date"]["rejection_reason"] == "invalid_date_format"
+    assert result["layoutxlm"]["rejected_fields"]["seller_address"]["rejection_reason"] == "too_short_or_numeric"
+    assert result["fields"]["total_amount"]["value"] == 180
+    assert result["fields"]["total_amount"]["source"] == "llm:ocr_correction"
