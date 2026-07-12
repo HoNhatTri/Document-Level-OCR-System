@@ -10,6 +10,7 @@ api_key.env
 .env
 .env.*
 
+# Legacy local folder name; the active model directory is models/.
 model/
 models/
 checkpoints/

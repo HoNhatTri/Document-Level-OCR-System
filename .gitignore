@@ -19,10 +19,9 @@ dist/
 build/
 
 # OCR and ML model artifacts
-model/*
-!model/README.md
+# Legacy local folder name; keep ignored after merging model artifacts into models/.
+model/
 models/*
-!models/README.md
 checkpoints/
 checkpoint-*/
 runs/

@@ -24,7 +24,7 @@ class OptionalLayoutXLMExtractor:
     def __init__(self, model_path: str | Path | None = None):
         configured_path = model_path or os.getenv(
             "LAYOUTXLM_MODEL_PATH",
-            "model",
+            "models",
         )
         self.model_path = Path(configured_path)
         self.enabled_by_config = (

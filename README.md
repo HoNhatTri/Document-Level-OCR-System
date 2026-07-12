@@ -28,18 +28,17 @@ Core capabilities:
 
 ```text
 project-root/
-├── src/                         # Backend, OCR, AI agent, monitoring, train/evaluate scripts
-├── data/                        # Data scripts, sample images, manifest examples
-├── model/                       # Local large model artifacts, ignored by Git
-├── models/                      # Model documentation for submission compatibility
-├── configs/                     # OCR and tuned config files
-├── tests/                       # Unit tests
-├── docs/                        # Assignment technical documents
-├── UI/Data Export Interface/    # React/Vite frontend
-├── Dockerfile.backend
-├── docker-compose.yml
-├── requirements.txt
-└── README.md
+|-- src/                         # Backend, OCR, AI agent, monitoring, train/evaluate scripts
+|-- data/                        # Data scripts, sample images, manifest examples
+|-- models/                      # Local large model artifacts, ignored by Git
+|-- configs/                     # OCR and tuned config files
+|-- tests/                       # Unit tests
+|-- docs/                        # Assignment technical documents
+|-- UI/Data Export Interface/    # React/Vite frontend
+|-- Dockerfile.backend
+|-- docker-compose.yml
+|-- requirements.txt
+`-- README.md
 ```
 
 Technical documents are in [docs/index.md](docs/index.md).
@@ -61,6 +60,10 @@ Frontend:
 cd "UI\Data Export Interface"
 npm install
 ```
+
+The frontend source is in `UI/Data Export Interface`. It is the React/Vite
+implementation of the Data Export Interface design and is started with
+`npm run dev`.
 
 ## Run the System Locally
 
@@ -98,7 +101,7 @@ URLs:
 - Health: `http://localhost:8000/api/health`
 - Monitoring: `http://localhost:8000/api/monitoring`
 
-Large model files are not copied into Docker images. Put local checkpoints under `model/` and Docker Compose will mount them into the backend container.
+Large model files are not copied into Docker images. Put local checkpoints under `models/` and Docker Compose will mount them into the backend container.
 
 ## API Inference
 
@@ -146,10 +149,73 @@ python -m src.train \
 LayoutXLM/LayoutLMv2 fine-tuning is documented in [docs/model_development.md](docs/model_development.md). The trained checkpoint should be placed locally at:
 
 ```text
-model/
+models/
 ```
 
-Expected optional checkpoint files are documented in [model/README.md](model/README.md).
+Expected optional checkpoint files are listed in the LayoutXLM section below.
+
+## Data Management
+
+This project is designed for public, synthetic, or anonymized document data.
+Do not commit raw documents that contain names, addresses, phone numbers, tax
+codes, emails, signatures, or other private information.
+
+Expected data sources:
+
+- Public OCR/document datasets such as SROIE for receipt information extraction.
+- MC-OCR or equivalent Vietnamese receipt/invoice OCR datasets.
+- Synthetic invoice templates for functional and smoke testing.
+- Local private data only after removing or masking personally identifiable information.
+
+Recommended data layout:
+
+```text
+data/
+|-- raw/                  # Original local/private files, ignored by Git
+|-- processed/            # Cleaned OCR-ready files, ignored by Git
+|-- manifests/            # JSONL train/validation/test manifests
+|-- sample_images/        # Small non-sensitive samples for smoke tests
+`-- exported_document.*   # Generated exports, ignored by Git
+```
+
+Training and evaluation scripts expect JSONL manifests. One line represents one
+document:
+
+```json
+{
+  "file_path": "data/processed/invoice_001.png",
+  "document_type": "invoice",
+  "fields": {
+    "invoice_number": "INV-001",
+    "total_amount": "2338.35",
+    "buyer": "Ms. Mary D. Dunton"
+  }
+}
+```
+
+LayoutXLM fine-tuning can additionally use word-level labels:
+
+```json
+{
+  "image_path": "data/processed/invoice_001.png",
+  "words": ["Invoice", "#", "INV-001"],
+  "boxes": [[100, 100, 180, 130], [185, 100, 200, 130], [210, 100, 310, 130]],
+  "labels": ["O", "O", "B-INVOICE_NUMBER"]
+}
+```
+
+Boxes are normalized to the 0-1000 LayoutLM/LayoutXLM coordinate space.
+
+Recommended data split:
+
+- Train: 70%
+- Validation: 15%
+- Test: 15%
+
+Splits should be stratified by document type and language whenever possible.
+Public invoice/receipt datasets may over-represent clean scans and
+under-represent mobile photos, so blurred, skewed, Vietnamese, and dense-layout
+samples should be included in evaluation.
 
 ## Evaluate
 
@@ -169,7 +235,7 @@ The evaluator reports:
 - p95 latency.
 - Per-document warnings and errors.
 
-Manifest format is described in [data/README.md](data/README.md).
+Manifest format is described in the Data Management section above.
 
 ## Optional LLM
 
@@ -188,14 +254,33 @@ Restart the backend after editing the file. Do not commit `api_key.env`.
 Place the fine-tuned checkpoint files directly inside:
 
 ```text
-model/
+models/
 ```
+
+The optional model directory is ignored by Git except for local files on your
+machine. The project uses:
+
+- `python-doctr` OCR detector: `db_resnet50`
+- `python-doctr` OCR recognizer: `crnn_vgg16_bn`
+- Optional fine-tuned LayoutXLM/LayoutLMv2 token classifier for invoices and receipts
+- Optional Groq-hosted LLM for OCR correction, summarization, and document QA
+
+Expected LayoutXLM/LayoutLMv2 checkpoint files:
+
+- `config.json`
+- `model.safetensors`
+- `preprocessor_config.json`
+- `sentencepiece.bpe.model`
+- `special_tokens_map.json`
+- `tokenizer_config.json`
+- `tokenizer.json`
+- `training_args.bin`
 
 Configuration:
 
 ```env
 LAYOUTXLM_ENABLED=true
-LAYOUTXLM_MODEL_PATH=model
+LAYOUTXLM_MODEL_PATH=models
 LAYOUTXLM_DEVICE=auto
 LAYOUTXLM_MIN_CONFIDENCE=0.55
 LAYOUTXLM_CHUNK_WORDS=180
@@ -297,7 +382,7 @@ Current focused test suite covers:
 - Do not commit private documents.
 - Use public, synthetic, or anonymized data.
 - Large datasets and checkpoints should be kept outside Git.
-- `api_key.env`, `.env`, `model/`, generated exports, and temporary uploads are ignored.
+- `api_key.env`, `.env`, `models/` model files, generated exports, and temporary uploads are ignored.
 
 See [docs/privacy_robustness_ethics.md](docs/privacy_robustness_ethics.md).
 

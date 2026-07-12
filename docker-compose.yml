@@ -7,10 +7,10 @@ services:
       - path: ./api_key.env
         required: false
     environment:
-      LAYOUTXLM_MODEL_PATH: /app/model
+      LAYOUTXLM_MODEL_PATH: /app/models
     volumes:
       - ./data:/app/data
-      - ./model:/app/model:ro
+      - ./models:/app/models:ro
     ports:
       - "8000:8000"
     healthcheck:

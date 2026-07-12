@@ -17,5 +17,5 @@ Create JSONL manifests in:
   data/manifests/
 
 Large datasets and private documents must not be committed to Git.
-See data/README.md for manifest format and split policy.
+See the root README.md for manifest format and split policy.
 EOF
