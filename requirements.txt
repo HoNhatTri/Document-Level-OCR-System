@@ -8,6 +8,10 @@ reportlab
 python-docx
 python-dotenv
 groq
+kagglehub
+torch
+torchvision
+matplotlib
 transformers==4.57.6
 sentencepiece
 safetensors
