@@ -48,7 +48,7 @@ def clean_label(text):
 
 
 # ==========================================
-# TẢI 2 TẬP DỮ LIỆU TỪ KAGGLE
+# TẢI TẬP DỮ LIỆU TỪ KAGGLE
 # ==========================================
 print("\n[+] Đang tải Dataset VinAI...")
 if not os.path.exists(data_vinai_dir):

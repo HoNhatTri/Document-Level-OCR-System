@@ -185,10 +185,6 @@ async def upload_document(file: UploadFile = File(...)):
                 processed_temp_path_obj.unlink()
             except OSError:
                 pass
-
-    finally:
-        if temp_file_path.exists():
-            temp_file_path.unlink()
             
         processed_temp_path_obj = Path(getattr(engine, 'current_processed_image_path', "")) if getattr(engine, 'current_processed_image_path', None) else None
         if processed_temp_path_obj and processed_temp_path_obj.exists() and processed_temp_path_obj != temp_file_path:
@@ -240,7 +236,6 @@ async def upload_document(file: UploadFile = File(...)):
         "layout_regions": layout_regions,
         "ai_analysis": ai_analysis,
         "bounding_boxes": bounding_boxes,
-        "processed_image_base64": base64_image
         "processed_image_base64": base64_image
     }
 

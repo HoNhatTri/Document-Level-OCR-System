@@ -16,3 +16,5 @@ transformers==4.57.6
 sentencepiece
 safetensors
 pytest
+scikit-learn
+Pillow

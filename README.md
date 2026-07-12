@@ -40,6 +40,22 @@ project-root/
 `-- README.md
 ```
 
+## Guide to Downloading PARSeq Model Weights
+
+This project utilizes a fine-tuned PARSeq model for text recognition. The best model weights (`parseq_BEST.pt`) are currently hosted on [Kaggle](https://www.kaggle.com/datasets/twean24/parseq-best).
+
+To run the system or perform Continual Learning, you need to download these weights and place them in the `models/` directory of the project.
+
+After downloading, your project structure should look exactly like this:
+```text
+project-root/
+├── ...
+├── models/
+│   └── parseq_BEST.pt    <-- Place the weight file here
+├── src/
+└── ...
+```
+
 ## Environment Setup
 
 Python 3.11 is recommended.
@@ -132,18 +148,41 @@ Output contains:
 - `ai_analysis`
 - `bounding_boxes`
 
-## Train or Tune Models
+## Data Management
 
-Lightweight document-agent threshold tuning:
-
+### Automated Data Loader
+To automatically download the Vietnamese OCR dataset (via Kaggle), clean the labels, and prepare the standard directory structure for training, open your Terminal or Command Prompt at the root directory of your project and execute:
 ```bash
-python -m src.train \
-  --train-manifest data/manifests/train.jsonl \
-  --validation-manifest data/manifests/validation.jsonl \
-  --output configs/tuned_agent_config.json
+python src/data_loader.py
 ```
 
-For LayoutXLM/LayoutLMv2 fine-tuning, prepare word-level BIO labels with
+### Data Split & Directory Layout
+Our automated data_loader.py script applies a robust stratified split to ensure model generalizability: 80% Train, 10% Validation, and 10% Test.
+
+After execution, your data directory will be automatically organized as follows:
+
+```text
+data/
+|-- vietnamese-ocr/       # Dataset from Kaggle
+|-- cropped_images/       # Raw cropped images from datasets
+|-- doctr_dataset/        # Standardized dataset ready for OCR training
+    |-- train/            # Contains images and labels.json (80%)
+    |-- val/              # Contains images and labels.json (10%)
+    `-- test/             # Contains images and labels.json (10%)
+```
+
+
+## Train & Fine-Tune Models
+- Our system uses pre-trained model: [docTR (Document Text Recognition)](https://github.com/mindee/doctr) to solve the prooblem of OCR.
+- However, since the model does not yet support Vietnamese, we are preparing data and training the model so that it can recognize Vietnamese characters.
+- At the same time, we also applied the [protonx-legal-tc model](https://huggingface.co/protonx-models/protonx-legal-tc) to support Vietnamese spelling correction if the results from the OCR model contained errors.
+- Open your Terminal or Command Prompt at the root directory of your project and execute the following command:
+```bash
+python src/train_ocr.py
+```
+
+
+- For LayoutXLM/LayoutLMv2 fine-tuning, prepare word-level BIO labels with
 normalized 0-1000 boxes, train a token-classification checkpoint, and place the
 exported checkpoint locally at:
 
@@ -152,69 +191,6 @@ models/
 ```
 
 Expected optional checkpoint files are listed in the LayoutXLM section below.
-
-## Data Management
-
-This project is designed for public, synthetic, or anonymized document data.
-Do not commit raw documents that contain names, addresses, phone numbers, tax
-codes, emails, signatures, or other private information.
-
-Expected data sources:
-
-- Public OCR/document datasets such as SROIE for receipt information extraction.
-- MC-OCR or equivalent Vietnamese receipt/invoice OCR datasets.
-- Synthetic invoice templates for functional and smoke testing.
-- Local private data only after removing or masking personally identifiable information.
-
-Recommended data layout:
-
-```text
-data/
-|-- raw/                  # Original local/private files, ignored by Git
-|-- processed/            # Cleaned OCR-ready files, ignored by Git
-|-- manifests/            # JSONL train/validation/test manifests
-|-- sample_images/        # Small non-sensitive samples for smoke tests
-`-- exported_document.*   # Generated exports, ignored by Git
-```
-
-Training and evaluation scripts expect JSONL manifests. One line represents one
-document:
-
-```json
-{
-  "file_path": "data/processed/invoice_001.png",
-  "document_type": "invoice",
-  "fields": {
-    "invoice_number": "INV-001",
-    "total_amount": "2338.35",
-    "buyer": "Ms. Mary D. Dunton"
-  }
-}
-```
-
-LayoutXLM fine-tuning can additionally use word-level labels:
-
-```json
-{
-  "image_path": "data/processed/invoice_001.png",
-  "words": ["Invoice", "#", "INV-001"],
-  "boxes": [[100, 100, 180, 130], [185, 100, 200, 130], [210, 100, 310, 130]],
-  "labels": ["O", "O", "B-INVOICE_NUMBER"]
-}
-```
-
-Boxes are normalized to the 0-1000 LayoutLM/LayoutXLM coordinate space.
-
-Recommended data split:
-
-- Train: 70%
-- Validation: 15%
-- Test: 15%
-
-Splits should be stratified by document type and language whenever possible.
-Public invoice/receipt datasets may over-represent clean scans and
-under-represent mobile photos, so blurred, skewed, Vietnamese, and dense-layout
-samples should be included in evaluation.
 
 ## Evaluate
 
@@ -260,7 +236,7 @@ The optional model directory is ignored by Git except for local files on your
 machine. The project uses:
 
 - `python-doctr` OCR detector: `db_resnet50`
-- `python-doctr` OCR recognizer: `crnn_vgg16_bn`
+- `python-doctr` OCR recognizer: `parseq`
 - Optional fine-tuned LayoutXLM/LayoutLMv2 token classifier for invoices and receipts
 - Optional Groq-hosted LLM for OCR correction, summarization, and document QA
 
