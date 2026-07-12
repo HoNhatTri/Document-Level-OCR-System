@@ -315,6 +315,16 @@ Keep the frontend running on Windows as usual:
 cd "D:\ForCodeOnly\Document-Level-OCR-System\UI\Data Export Interface"
 npm.cmd run dev
 ```
+## Model and Dataset Links
+
+- Base model: https://huggingface.co/microsoft/layoutxlm-base
+
+- Fine-tuned model checkpoint:
+  https://drive.google.com/drive/folders/1xdzYJIpI1ABdQAfnFlj6Tl9R4XBfZEy8?usp=drive_link
+
+- SROIE dataset: https://www.kaggle.com/datasets/urbikn/sroie-datasetv2/data
+
+- MC-OCR dataset: https://www.kaggle.com/datasets/domixi1989/vietnamese-receipts-mc-ocr-2021
 
 ## Monitoring and Logging
 
