@@ -33,15 +33,12 @@ project-root/
 |-- models/                      # Local large model artifacts, ignored by Git
 |-- configs/                     # OCR and tuned config files
 |-- tests/                       # Unit tests
-|-- docs/                        # Assignment technical documents
 |-- UI/Data Export Interface/    # React/Vite frontend
 |-- Dockerfile.backend
 |-- docker-compose.yml
 |-- requirements.txt
 `-- README.md
 ```
-
-Technical documents are in [docs/index.md](docs/index.md).
 
 ## Environment Setup
 
@@ -146,7 +143,9 @@ python -m src.train \
   --output configs/tuned_agent_config.json
 ```
 
-LayoutXLM/LayoutLMv2 fine-tuning is documented in [docs/model_development.md](docs/model_development.md). The trained checkpoint should be placed locally at:
+For LayoutXLM/LayoutLMv2 fine-tuning, prepare word-level BIO labels with
+normalized 0-1000 boxes, train a token-classification checkpoint, and place the
+exported checkpoint locally at:
 
 ```text
 models/
@@ -383,8 +382,6 @@ Current focused test suite covers:
 - Use public, synthetic, or anonymized data.
 - Large datasets and checkpoints should be kept outside Git.
 - `api_key.env`, `.env`, `models/` model files, generated exports, and temporary uploads are ignored.
-
-See [docs/privacy_robustness_ethics.md](docs/privacy_robustness_ethics.md).
 
 ## Deployment Limitations
 

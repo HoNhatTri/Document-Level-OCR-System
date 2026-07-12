@@ -12,7 +12,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Tune lightweight document-agent thresholds on OCR text manifests. "
-            "Fine-tuned LayoutXLM training is documented in docs/model_development.md."
+            "Fine-tuned LayoutXLM training uses word-level BIO labels and "
+            "normalized 0-1000 boxes. Place the exported checkpoint in models/."
         )
     )
     parser.add_argument("--train-manifest", required=True, help="JSONL manifest with text and labels.")
