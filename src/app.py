@@ -6,6 +6,8 @@ from typing import Any
 from uuid import uuid4
 import base64
 import os
+import base64
+import os
 
 from docx import Document
 from docx.oxml.ns import qn
@@ -26,6 +28,7 @@ from src.ocr_engine import OCREngine
 from src.reading_order import ordered_lines_from_structured, raw_text_from_structured, word_rows_from_structured
 from src.settings import get_settings, save_settings
 from src.table_extractor import TableExtractor
+from src.vie_text_corrector import TextCorrector
 from src.vie_text_corrector import TextCorrector
 
 app = FastAPI()
@@ -183,9 +186,21 @@ async def upload_document(file: UploadFile = File(...)):
             except OSError:
                 pass
 
+    finally:
+        if temp_file_path.exists():
+            temp_file_path.unlink()
+            
+        processed_temp_path_obj = Path(getattr(engine, 'current_processed_image_path', "")) if getattr(engine, 'current_processed_image_path', None) else None
+        if processed_temp_path_obj and processed_temp_path_obj.exists() and processed_temp_path_obj != temp_file_path:
+            try:
+                processed_temp_path_obj.unlink()
+            except OSError:
+                pass
+
     structured_data = engine.get_structured_data(raw_result)
     structured_data["_processing"] = engine.get_processing_info()
     extracted_text = engine.get_raw_text(raw_result, structured_data=structured_data)
+    extracted_text = text_corrector.correct_document(extracted_text)
     extracted_text = text_corrector.correct_document(extracted_text)
     tables = table_extractor.extract_tables(structured_data)
     layout_regions = layout_analyzer.analyze(structured_data, tables=tables)
@@ -225,6 +240,7 @@ async def upload_document(file: UploadFile = File(...)):
         "layout_regions": layout_regions,
         "ai_analysis": ai_analysis,
         "bounding_boxes": bounding_boxes,
+        "processed_image_base64": base64_image
         "processed_image_base64": base64_image
     }
 

@@ -175,8 +175,10 @@ export default function App() {
         setBoundingBoxes((prev) => ({...prev, [fileId]: result.bounding_boxes}));
       }
 
+      const finalImageUrl = result.processed_image_base64 || imageUrl;
+
       // Đánh dấu file hoàn thành
-      setFiles((prev) => prev.map(f => f.id === fileId ? { ...f, status: "completed" } : f));
+      setFiles((prev) => prev.map(f => f.id === fileId ? { ...f, status: "completed", imageUrl: finalImageUrl } : f));
       toast.success("Xử lý tài liệu thành công!");
       
     } catch (error) {
